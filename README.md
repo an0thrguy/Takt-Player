@@ -38,7 +38,7 @@ Takt - personal local music player for Linux, built with Flutter and libmpv.
 
 ## Разработка
 
-Карта кода и точки ручной настройки: [Editing Takt](docs/code-guide.md). Комментарии в исходниках — на английском.
+Карта кода и точки ручной настройки: [Editing Takt](docs/code-guide.md). Комментарии в исходниках на английском.
 
 Окружение описано в [linux-development-setup.md](docs/linux-development-setup.md).
 
