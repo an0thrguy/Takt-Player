@@ -1,0 +1,9 @@
+{
+  "tracks": 500,
+  "searchVisibleMs": 66.25,
+  "tapToFirstUpdatedFramesMs": 49.418,
+  "frameSamples": 71,
+  "frameMedianMs": 8.745,
+  "frameP95Ms": 22.89,
+  "method": "Flutter Linux native; selected build mode;  TextInputClient update to settled UI (IME dispatch excluded); tap includes input dispatch, frame timing includes build/raster pipeline; synthetic indexed library"
+}

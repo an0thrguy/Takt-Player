@@ -1,0 +1,68 @@
+[
+  {
+    "file": "check.aac",
+    "play": true,
+    "seek": true,
+    "end": true
+  },
+  {
+    "file": "check.aiff",
+    "play": true,
+    "seek": true,
+    "end": true
+  },
+  {
+    "file": "check.alac.m4a",
+    "play": true,
+    "seek": true,
+    "end": true
+  },
+  {
+    "file": "check.flac",
+    "play": true,
+    "seek": true,
+    "end": true
+  },
+  {
+    "file": "check.m4a",
+    "play": true,
+    "seek": true,
+    "end": true
+  },
+  {
+    "file": "check.mp3",
+    "play": true,
+    "seek": true,
+    "end": true
+  },
+  {
+    "file": "check.ogg",
+    "play": true,
+    "seek": true,
+    "end": true
+  },
+  {
+    "file": "check.opus",
+    "play": true,
+    "seek": true,
+    "end": true
+  },
+  {
+    "file": "check.wav",
+    "play": true,
+    "seek": true,
+    "end": true
+  },
+  {
+    "file": "check.wma",
+    "play": true,
+    "seek": true,
+    "end": true
+  },
+  {
+    "file": "check.wv",
+    "play": true,
+    "seek": true,
+    "end": true
+  }
+]

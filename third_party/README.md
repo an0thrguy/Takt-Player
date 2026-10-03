@@ -1,0 +1,3 @@
+# Local dependency
+
+cnativeapi 0.3.0 is retained with its original license. The pubspec workspace-resolution field is removed for standalone use. The Linux StatusNotifierItem handler now emits TrayIconClickedEvent for Activate and TrayIconRightClickedEvent for SecondaryActivate/ContextMenu. Upstream accepted these calls without notifying Dart, preventing restoration on Waybar. Event emission respects the existing null-owner teardown guard. The D-Bus Menu property exposes a configured context menu independently of whether primary-click opens that menu, so Waybar can show its actions without losing primary-click restoration. Covered by the real D-Bus integration_test/background_test.dart scenario. No global package-cache edits are required to build Takt.
