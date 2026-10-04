@@ -26,7 +26,10 @@ class Application::Impl {
     gtk_init(nullptr, nullptr);
 
     // Create GTK application with default ID
-    gtk_app_ = gtk_application_new("com.nativeapi.application", G_APPLICATION_DEFAULT_FLAGS);
+    // Default flags are zero on every supported GLib version. The named
+    // G_APPLICATION_DEFAULT_FLAGS constant requires GLib 2.74; Ubuntu 22.04
+    // ships 2.72, so use the equivalent typed value for compatibility.
+    gtk_app_ = gtk_application_new("com.nativeapi.application", static_cast<GApplicationFlags>(0));
 
     if (!gtk_app_) {
       return false;
