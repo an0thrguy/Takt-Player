@@ -25,7 +25,9 @@ class TaktQueue extends ChangeNotifier {
       _shuffled.clear();
       _shuffleInitialized = false;
     }
+    final changed = _mode != value;
     _mode = value;
+    if (changed) notifyListeners();
   }
 
   bool _shuffleInitialized = false;

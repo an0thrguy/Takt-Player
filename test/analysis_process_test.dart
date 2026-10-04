@@ -30,4 +30,33 @@ void main() {
     );
     expect(analysis.frame(const Duration(milliseconds: 500), false), isEmpty);
   });
+  test(
+    'analysis can be replaced and disposed while startup is suspended',
+    () async {
+      final dir = await Directory.systemTemp.createTemp('takt-cancel-');
+      addTearDown(() => dir.delete(recursive: true));
+      final path = '${dir.path}/tone.wav';
+      final result = await Process.run('ffmpeg', [
+        '-v',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=frequency=100:duration=1',
+        path,
+      ]);
+      expect(result.exitCode, 0);
+      final analysis = AudioAnalysis();
+      analysis.setActive(false);
+      final first = analysis.load(path);
+      final second = analysis.load(path);
+      analysis.setActive(true);
+      await Future.wait([first, second]).timeout(const Duration(seconds: 10));
+      expect(analysis.spectra.length, 20);
+      analysis.setActive(false);
+      final cancelled = analysis.load(path);
+      analysis.dispose();
+      await cancelled.timeout(const Duration(seconds: 10));
+    },
+  );
 }

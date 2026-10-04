@@ -1,0 +1,71 @@
+name: Linux release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the verified version from pubspec.yaml
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: linux-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build and runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libxi-dev libx11-dev libmpv-dev ffmpeg libglu1-mesa xvfb dbus-x11
+      - name: Install verified Flutter SDK
+        run: |
+          curl --fail --location --retry 3 https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.47.6-stable.tar.xz -o "$RUNNER_TEMP/flutter.tar.xz"
+          printf '%s  %s\n' f1631b9c2c8b3529323db412b0d1beacf4a748f8783b0d7cf599a8fd5f461675 "$RUNNER_TEMP/flutter.tar.xz" | sha256sum --check
+          tar -xf "$RUNNER_TEMP/flutter.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - name: Resolve and verify
+        run: |
+          flutter config --enable-linux-desktop
+          flutter pub get --enforce-lockfile
+          flutter analyze
+          flutter test
+          bash -n tool/package.sh tool/install-release.sh
+      - name: Check native interface
+        run: dbus-run-session -- xvfb-run -a flutter test integration_test/approved_update_test.dart -d linux
+      - name: Build and package
+        run: |
+          flutter build linux --release
+          ./tool/package.sh
+          ldd build/linux/x64/release/bundle/takt > dist/DEPENDENCIES.txt
+          if grep -q 'not found' dist/DEPENDENCIES.txt; then exit 1; fi
+          printf 'Built on Ubuntu 22.04 x86_64 with Flutter 3.47.6 and Dart 3.13.5.\n' > dist/BUILD-INFO.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Takt-linux-x86_64
+          path: |
+            dist/*.tar.gz
+            dist/SHA256SUMS.txt
+            dist/DEPENDENCIES.txt
+            dist/BUILD-INFO.txt
+          if-no-files-found: error
+      - name: Publish release after successful checks
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(sed -n 's/^version: \([0-9.]*\).*/\1/p' pubspec.yaml)"
+          tag="v$version"
+          # Never silently replace a published release or move its tag.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; choose a new version."
+            exit 1
+          fi
+          gh release create "$tag" dist/*.tar.gz dist/SHA256SUMS.txt dist/DEPENDENCIES.txt dist/BUILD-INFO.txt --target "$GITHUB_SHA" --title "Takt $version — Linux" --notes-file "docs/releases/$tag.md"

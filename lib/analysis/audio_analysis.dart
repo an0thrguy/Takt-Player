@@ -1,118 +1,214 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 import 'dart:math' as math;
 
-// Visualizer derived from actual file PCM, not a microphone; FFmpeg analyzes separately from playback.
+import 'spectrum.dart';
+
+// Decode the current file independently; an isolate keeps FFT work off the UI.
 class AudioAnalysis {
   List<double> values = [];
-  Process? _process;
+  final List<List<double>> spectra = [];
+  final _scaler = SpectrumScaler();
+  SendPort? _control;
+  void Function()? _cancel;
   int _generation = 0;
   bool _active = true;
-  // Pause the Linux analysis process while playback is paused or the window is hidden.
+  int _lastFrame = -1;
+  double _lastSensitivity = -1;
+  List<double> _lastValues = [];
   void setActive(bool value) {
     if (value == _active) return;
     _active = value;
-    _process?.kill(value ? ProcessSignal.sigcont : ProcessSignal.sigstop);
+    _control?.send(['active', value]);
   }
 
-  // RMS over 400 samples: at 8 kHz, each point represents 50 ms of audio.
+  // Legacy RMS utility remains useful for PCM regression checks.
   static List<double> envelope(Int16List samples) {
     final result = <double>[];
     for (int start = 0; start < samples.length; start += 400) {
       double sum = 0;
       final end = math.min(samples.length, start + 400);
       for (int i = start; i < end; i++) {
-        final value = samples[i] / 32768;
-        sum += value * value;
+        final v = samples[i] / 32768;
+        sum += v * v;
       }
       result.add(math.sqrt(sum / (end - start)));
     }
     return result;
   }
 
-  // Loading a file cancels old analysis; generation guards discard late data from the old process.
   Future<void> load(String path) async {
+    _cancel?.call();
     final generation = ++_generation;
-    _process?.kill(ProcessSignal.sigcont);
-    _process?.kill();
+    _control = null;
     values = [];
+    spectra.clear();
+    _scaler.reset();
+    _lastFrame = -1;
+    final port = ReceivePort(), done = Completer<void>();
+    bool cancelled = false;
+    void finish() {
+      if (!done.isCompleted) done.complete();
+      port.close();
+    }
+
+    _cancel = () {
+      cancelled = true;
+      _control?.send(['cancel']);
+    };
+    port.listen((message) {
+      if (message is SendPort) {
+        if (cancelled || generation != _generation) {
+          message.send(['cancel']);
+        } else {
+          _control = message;
+          message.send(['active', _active]);
+        }
+      } else {
+        final data = message as List;
+        if (data[0] == 'done') {
+          finish();
+          return;
+        }
+        if (generation == _generation && !cancelled && data[0] == 'data') {
+          values.addAll((data[1] as List).cast<double>());
+          spectra.addAll(
+            (data[2] as List).map((v) => (v as List).cast<double>()),
+          );
+        }
+      }
+    });
     try {
-      final process = await Process.start('ffmpeg', [
-        '-v',
-        'error',
-        '-i',
-        path,
-        '-vn',
-        '-ac',
-        '1',
-        '-ar',
-        '8000',
-        '-f',
-        's16le',
-        'pipe:1',
-      ]);
-      if (generation != _generation) {
-        process.kill();
-        return;
-      }
-      _process = process;
-      if (!_active) process.kill(ProcessSignal.sigstop);
-      process.stderr.drain<void>();
-      // A stdout chunk can split a 16-bit sample; carry its remaining byte into the next chunk.
-      int? carry;
-      int samples = 0;
-      double sum = 0;
-      await for (final chunk in process.stdout) {
-        if (generation != _generation) break;
-        int i = 0;
-        if (carry != null && chunk.isNotEmpty) {
-          int sample = carry | chunk[0] << 8;
-          if (sample >= 32768) sample -= 65536;
-          sum += math.pow(sample / 32768, 2);
-          samples++;
-          if (samples == 400) {
-            values.add(math.sqrt(sum / 400));
-            samples = 0;
-            sum = 0;
-          }
-          carry = null;
-          i = 1;
-        }
-        for (; i + 1 < chunk.length; i += 2) {
-          int sample = chunk[i] | chunk[i + 1] << 8;
-          if (sample >= 32768) sample -= 65536;
-          sum += math.pow(sample / 32768, 2);
-          samples++;
-          if (samples == 400) {
-            values.add(math.sqrt(sum / 400));
-            samples = 0;
-            sum = 0;
-          }
-        }
-        if (i < chunk.length) carry = chunk[i];
-      }
-      await process.exitCode;
+      await Isolate.spawn(_decode, [path, port.sendPort, _active]);
+      await done.future;
     } catch (_) {
-      if (generation == _generation) values = [];
+      finish();
+    }
+    if (generation == _generation) {
+      _control = null;
+      _cancel = null;
     }
   }
 
-  // 24 amplitude points around the current position; adjust visual detail and gain here.
-  List<double> frame(Duration position, bool playing) {
-    if (!playing || values.isEmpty) return [];
+  List<double> frame(
+    Duration position,
+    bool playing, {
+    double sensitivity = 1,
+  }) {
+    if (!playing || spectra.isEmpty) return [];
     final index = position.inMilliseconds ~/ 50;
-    return List.generate(24, (i) {
-      final j = index + i - 12;
-      return j >= 0 && j < values.length
-          ? (values[j] * 3).clamp(0, 1).toDouble()
-          : 0;
-    });
+    if (index < 0 || index >= spectra.length) return [];
+    if (_lastFrame != index || _lastSensitivity != sensitivity) {
+      _lastFrame = index;
+      _lastSensitivity = sensitivity;
+      _lastValues = _scaler.scale(spectra[index], sensitivity: sensitivity);
+    }
+    return _lastValues;
   }
 
-  // Resume a SIGSTOP process before terminating it so it can handle the termination signal.
   void dispose() {
+    _cancel?.call();
     _generation++;
-    _process?.kill(ProcessSignal.sigcont);
-    _process?.kill();
+    _control = null;
+  }
+}
+
+// The worker owns its FFmpeg process and handles cancellation even during startup.
+Future<void> _decode(List arguments) async {
+  final path = arguments[0] as String, output = arguments[1] as SendPort;
+  bool active = arguments[2] as bool, cancelled = false;
+  Process? process;
+  final controls = ReceivePort();
+  controls.listen((message) {
+    final command = message as List;
+    if (command[0] == 'cancel') {
+      cancelled = true;
+      process?.kill(ProcessSignal.sigcont);
+      process?.kill();
+    } else {
+      active = command[1] as bool;
+      process?.kill(active ? ProcessSignal.sigcont : ProcessSignal.sigstop);
+    }
+  });
+  output.send(controls.sendPort);
+  try {
+    process = await Process.start('ffmpeg', [
+      '-v',
+      'error',
+      '-i',
+      path,
+      '-vn',
+      '-ac',
+      '1',
+      '-ar',
+      '${FrequencySpectrum.sampleRate}',
+      '-f',
+      's16le',
+      'pipe:1',
+    ]);
+    if (cancelled) {
+      process.kill();
+      await process.exitCode;
+      return;
+    }
+    if (!active) process.kill(ProcessSignal.sigstop);
+    unawaited(process.stderr.drain<void>());
+    final ring = Int16List(FrequencySpectrum.window);
+    int written = 0, hop = 0, total = 0, rmsFrames = 0;
+    double energy = 0;
+    int? carry;
+    await for (final chunk in process.stdout) {
+      if (cancelled) break;
+      final rms = <double>[], frames = <List<double>>[];
+      void sample(int value) {
+        if (value >= 32768) value -= 65536;
+        ring[written] = value;
+        written = (written + 1) % ring.length;
+        energy += (value / 32768) * (value / 32768);
+        hop++;
+        total++;
+        // Integer sample rate has alternating 1102/1103-sample 50ms windows.
+        final boundary =
+            ((rmsFrames + frames.length + 1) *
+                    FrequencySpectrum.sampleRate /
+                    20)
+                .floor();
+        if (total >= boundary) {
+          rms.add(math.sqrt(energy / hop));
+          hop = 0;
+          energy = 0;
+          final ordered = Int16List(ring.length);
+          for (int i = 0; i < ring.length; i++) {
+            ordered[i] = ring[(written + i) % ring.length];
+          }
+          frames.add(FrequencySpectrum.analyze(ordered));
+        }
+      }
+
+      int i = 0;
+      if (carry != null && chunk.isNotEmpty) {
+        sample(carry | chunk[0] << 8);
+        carry = null;
+        i = 1;
+      }
+      for (; i + 1 < chunk.length; i += 2) {
+        sample(chunk[i] | chunk[i + 1] << 8);
+      }
+      if (i < chunk.length) carry = chunk[i];
+      rmsFrames += frames.length;
+      if (frames.isNotEmpty) output.send(['data', rms, frames]);
+    }
+    if (cancelled) {
+      process.kill(ProcessSignal.sigcont);
+      process.kill();
+    }
+    await process.exitCode;
+  } catch (_) {
+    /* Playback remains usable when optional analysis fails. */
+  } finally {
+    controls.close();
+    output.send(['done']);
   }
 }

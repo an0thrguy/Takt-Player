@@ -39,6 +39,12 @@ In `lib/ui/app.dart`:
 
 Settings keys are `dark`, `locale`, `accent`, `volume`, `closeToTray`, `onlineArtwork` and `wave`. Keep their meaning consistent across UI, startup and desktop lifecycle. `tr(ru, en)` supplies both translations. Changing a default affects new installations; it does not overwrite existing preferences.
 
+The approved update separates reusable surfaces into `lib/ui/glass.dart`, the right drawer into `lib/ui/settings_panel.dart`, and frequency rendering into `lib/ui/visualizer.dart`. FFT/logarithmic bands and adaptive headroom live in `lib/analysis/spectrum.dart`; FFmpeg decoding runs in an isolate owned by `AudioAnalysis`. Additional settings: `visualizerEnabled`, `visualizerStyle`, `visualizerSensitivity`, `visualizerSmoothness`, `visualizerColor`, `seekStep`, `pauseOnHeadphonesDisconnect`. A null visualizer color follows the theme. Favorites use track IDs and an independent `order:favorites` key. Filtered reordering preserves hidden positions.
+
+`interfaceDuration`, `animatedPage` and `showTaktDialog` in `glass.dart` coordinate internal transitions. Language uses `showGlassMenu`. `_PlaybackActivator.accepts` in `app.dart` rejects playback shortcuts before they match when text editing has focus; changing only the callback cannot prevent consumed spaces. Super+Q remains an unconditional activator.
+
+`lib/platform/audio_routes.dart` monitors PulseAudio-compatible device events and polls as a fallback. Only positive disappearance/unavailability evidence pauses headphones; unknown jack availability cannot distinguish a manual route change from unplugging. Failed probes preserve the last valid baseline. Disconnect never resumes playback.
+
 ## Invariants to preserve
 
 1. Restoring a session never starts playback automatically.
@@ -68,3 +74,7 @@ flutter build linux --release
 Use `integration_test/audio_output_test.dart` for the real system audio stream and the other native checks in `integration_test/` when changing playback or tray behavior. These tests require Linux desktop/audio services. The background test normally takes 15 minutes.
 
 `./tool/package.sh` creates the local release archive. `./tool/install.sh` optionally installs the bundle into the current user's application menu. The Hyprland helper is tied to a configured script path; update that path if moving the checkout.
+
+## Linux shell integration
+
+`lib/platform/mpris.dart` exposes the standard session-bus MPRIS interfaces. Serpantinum gates its CAVA process on MPRIS playback state, so this integration enables shell visualizers as well as media controls. Commands always go through `TaktQueue`; metadata includes personal display titles and artwork file URIs. Position is queried, not emitted as a PropertiesChanged update. `integration_test/mpris_test.dart` checks real playback, D-Bus controls and the installed Serpantinum MprisController/Cava components with isolated fixtures.

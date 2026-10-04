@@ -1,18 +1,32 @@
 # Takt
 
-Takt - personal local music player for Linux, built with Flutter and libmpv.
+Плеер локальной музыки для Linux / Local music player for Linux.
 
-Личный плеер локальной музыки для Linux. Первая версия: Flutter/Dart, звук через libmpv, локальная база SQLite. Android - следующий этап; Windows отложен.
+Минималистичный округлённый интерфейс, светлая и тёмная темы, стекло, плейлисты, избранное и частотный визуализатор. Русский и английский языки. Flutter/Dart + libmpv; локальная база SQLite.
 
-## Запуск
+## Скачать и установить / Download and install
 
-Из папки проекта:
+**[Последний выпуск / Latest release](https://github.com/an0thrguy/Takt-Player/releases/latest)**
 
-```sh
-./tool/run.sh
+Выберите `Takt-0.2.0-linux-x86_64.tar.gz` в Assets. Кнопка GitHub «Download ZIP» и файлы «Source code» содержат исходники, а не готовое приложение.
+
+**[Подробная инструкция на русском и английском](docs/install-linux.md)**
+
+После установки зависимостей:
+
+```bash
+tar -xzf Takt-0.2.0-linux-x86_64.tar.gz
+cd Takt-0.2.0-linux-x86_64
+./start.sh
+# Необязательно: добавить Takt в меню приложений, без sudo.
+./install.sh
 ```
 
-Или запускайте `takt` из распакованного Linux-архива. Каталоги `lib` и `data` должны оставаться рядом с ним.
+The binary is for Linux **x86_64**. Download the release `.tar.gz`, install the documented runtime dependencies, extract the entire folder, and run `./start.sh`. Flutter is only needed when building from source. The release is built on Ubuntu 22.04; it uses system libraries and is not a universal AppImage/Flatpak. Other distributions are not all verified. Android, ARM and Windows builds are not included.
+
+![Takt — dark theme](docs/screenshots/approved-update-dark.png)
+
+## Использование
 
 При первом запуске Takt использует стандартную папку XDG Music или `~/Music` / `~/Музыка`, если она существует. Иначе откроется выбор музыкальной папки. Дополнительные папки подключаются в настройках. Изменения файлов появляются автоматически при проверке раз в 10 секунд.
 
@@ -22,43 +36,37 @@ Takt - personal local music player for Linux, built with Flutter and libmpv.
 
 После перезапуска очередь и позиция восстанавливаются на паузе. Название и обложка меняются только внутри Takt. Удаление файла с устройства требует отдельного подтверждения.
 
-Закрытие по умолчанию сворачивает плеер в трей. Настройка позволяет завершать приложение. Если доступного трея нет, окно остаётся открытым. Явный выход - Super + Q, настройки и меню трея. Сочетание завершает приложение, даже если закрытие окна настроено на трей. В текущем Hyprland оно подключено через `tool/super-q.py`: обычные окна закрываются как раньше, Takt сохраняет состояние и выходит. В Waybar должен быть включён модуль `tray`.
+«Избранное» находится слева; добавить или убрать песню можно через звёздочку в меню строки. Новые песни добавляются в конец очереди без повторов.
+
+Пробел — пуск/пауза, стрелки влево/вправо — перемотка, вверх/вниз — громкость, Ctrl + влево/вправо — предыдущая/следующая песня. При вводе текста эти сочетания не мешают печатать. Шаг перемотки выбирается в настройках: 5, 10 или 15 секунд.
+
+Настройки открываются справа над панелью воспроизведения. Визуализатор анализирует частоты музыки: доступны сплошная волна и столбики, чувствительность, плавность и отдельный цвет. Его можно выключить. Пауза при отключении наушников включена по умолчанию; автоматического продолжения нет. Для проводных наушников определение зависит от доступности состояния разъёма в звуковом драйвере.
+
+Закрытие по умолчанию сворачивает плеер в трей. Настройка позволяет завершать приложение. Если доступного трея нет, окно остаётся открытым. Явный выход — Super + Q, настройки и меню трея. Сочетание завершает приложение, даже если закрытие окна настроено на трей. В Hyprland системный Super + Q может перехватывать это сочетание: для корректного выхода можно подключить `tool/super-q.py` вручную или использовать меню трея/настройки. Трей требует поддержки StatusNotifier рабочим окружением.
 
 Сетевой поиск обложек выключен. Его можно разрешить в настройках; запрос содержит метаданные песни, музыкальный файл не отправляется. Локальные и встроенные обложки используются без интернета.
 
-## Установка в меню приложений
+Окно без системной верхней полосы: плавающее окно можно перемещать за заголовок «Моя музыка» или название плейлиста. Внутренние меню, вкладки и настройки открываются плавно.
 
-Необязательно, после сборки:
+## Разработка / Build from source
 
-```sh
-./tool/install.sh
-```
+Flutter **3.47.6**, Dart **3.13.5**; зависимости закреплены в `pubspec.lock`. Понадобятся Clang, CMake, Ninja, pkg-config, заголовки GTK 3/X11/Xi, libmpv и FFmpeg. На Ubuntu:
 
-Скрипт копирует приложение в пользовательскую папку и добавляет пункт Takt в меню. Права администратора не нужны. Данные плеера хранятся отдельно в каталоге поддержки приложения, предоставленном Linux через `path_provider`.
-
-## Разработка
-
-Карта кода и точки ручной настройки: [Editing Takt](docs/code-guide.md). Комментарии в исходниках на английском.
-
-Окружение описано в [linux-development-setup.md](docs/linux-development-setup.md).
-
-```sh
-flutter pub get
+```bash
+sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev libx11-dev libxi-dev libmpv-dev ffmpeg libglu1-mesa
+flutter config --enable-linux-desktop
+flutter pub get --enforce-lockfile
 flutter analyze
 flutter test
 flutter build linux --release
 ./tool/package.sh
+./tool/run.sh
 ```
 
-Проверки настоящего звука и трея:
+[Карта кода / Editing guide](docs/code-guide.md) · [Release notes](docs/releases/v0.2.0.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-```sh
-ffmpeg -v error -f lavfi -i 'sine=frequency=440:duration=20' -y /tmp/takt-smoke.wav
-flutter test integration_test/platform_smoke_test.dart -d linux
-python tool/generate_fixtures.py
-flutter test integration_test/formats_test.dart -d linux
-flutter test integration_test/background_test.dart -d linux
-flutter drive -d linux --profile --driver=test_driver/integration_test.dart --target=integration_test/performance_test.dart
-```
+English comments identify the main customization points. GitHub Actions builds on Ubuntu 22.04, checks the app, produces the archive and SHA-256 checksums, and publishes a release only when explicitly dispatched with publication enabled. It never replaces an existing published version.
 
-Звуковой поток называется Takt и имеет отдельный профиль громкости от обычного mpv. Если система вручную отключила этот поток, включите его в системном микшере.
+## Переиспользование / Licensing
+
+Лицензия переиспользования собственного кода Takt пока не выбрана. Публичная доступность исходников сама по себе не означает MIT/GPL-лицензию. Сторонние компоненты сохраняют свои лицензии; их тексты входят в архив. / An open-source reuse license for Takt's own code has not yet been selected. Third-party components retain their original licenses.

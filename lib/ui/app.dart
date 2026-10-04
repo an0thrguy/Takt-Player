@@ -1,17 +1,20 @@
 import 'dart:io';
-import 'dart:ui';
 import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../core/store.dart';
 import '../core/track.dart';
 import '../library/library.dart';
 import '../library/delete_tracks.dart';
 import '../playback/queue.dart';
+import 'glass.dart';
+import 'visualizer.dart' as visuals;
+import 'settings_panel.dart';
 
 // Root interface. Library/queue own data changes; the exit callback performs full shutdown.
 class TaktApp extends StatefulWidget {
@@ -46,6 +49,8 @@ class _TaktAppState extends State<TaktApp> {
       playlistName = TextEditingController();
   String? playlist, folder;
   bool creating = false, folders = false, showQueue = false, volumeOpen = false;
+  bool showFavorites = false, settingsOpen = false;
+  String get viewKey => showFavorites ? 'favorites' : playlist ?? 'all';
   final selected = <String>{};
   bool get dark => settings['dark'] == true;
   bool get en => settings['locale'] == 'en';
@@ -84,6 +89,9 @@ class _TaktAppState extends State<TaktApp> {
   }
 
   void changed() {
+    // External MPRIS volume changes must not be overwritten by later UI settings.
+    final persisted = widget.store.read('settings') as Map?;
+    if (persisted?['volume'] != null) settings['volume'] = persisted!['volume'];
     if (mounted) setState(() {});
   }
 
@@ -145,17 +153,50 @@ class _TaktAppState extends State<TaktApp> {
               t,
       ];
     }
-    return library.visible(
-      query: search.text,
-      playlist: playlist,
-      folder: folder,
-      manual: widget.store.read('manual:${playlist ?? 'all'}') == true,
-    );
+    return library
+        .visible(
+          query: search.text,
+          playlist: playlist,
+          folder: folder,
+          favoritesOnly: showFavorites,
+          manual: widget.store.read('manual:$viewKey') == true,
+        )
+        .where((t) => !showFavorites || library.favorites.contains(t.id))
+        .toList();
+  }
+
+  // Playback keys are inactive inside text editing, while Super+Q remains global.
+  void _shortcut(Future<void> Function() action) {
+    final context = FocusManager.instance.primaryFocus?.context;
+    if (context?.widget is EditableText ||
+        context?.findAncestorWidgetOfExactType<EditableText>() != null) {
+      return;
+    }
+    action().catchError((Object error) => message(error.toString()));
+  }
+
+  Future<void> _seekBy(int direction) async {
+    final track = queue.current;
+    if (track == null || track.seconds <= 0) return;
+    final step = settings['seekStep'] as int? ?? 5;
+    final target = (queue.position.inMilliseconds + direction * step * 1000)
+        .clamp(0, (track.seconds * 1000).round());
+    await queue.seek(Duration(milliseconds: target));
+  }
+
+  Future<void> _volumeBy(double delta) async {
+    final volume = ((settings['volume'] as num? ?? 70).toDouble() + delta)
+        .clamp(0.0, 100.0);
+    settings['volume'] = volume;
+    saveSettings();
+    await queue.engine.volume(volume);
   }
 
   @override
   // Theme and overall layout: sidebar, main content and bottom playback panel.
   Widget build(BuildContext context) {
+    final ink = dark ? const Color(0xffeeeeee) : const Color(0xff202020);
+    final control = accent.toARGB32() == 0xff777777 ? ink : accent;
     final theme = ThemeData(
       useMaterial3: true,
       brightness: dark ? Brightness.dark : Brightness.light,
@@ -164,6 +205,19 @@ class _TaktAppState extends State<TaktApp> {
             seedColor: accent,
             brightness: dark ? Brightness.dark : Brightness.light,
           ).copyWith(
+            primary: control,
+            onPrimary: control.computeLuminance() > .4
+                ? Colors.black
+                : Colors.white,
+            secondary: control,
+            secondaryContainer: dark
+                ? const Color(0xff3a3b3c)
+                : const Color(0xffe1e2e3),
+            onSecondaryContainer: ink,
+            surfaceContainerHighest: dark
+                ? const Color(0xff303132)
+                : const Color(0xffe9eaeb),
+            surfaceTint: Colors.transparent,
             surface: dark ? const Color(0xff191a1b) : const Color(0xfffafafa),
             onSurface: dark ? const Color(0xffeeeeee) : const Color(0xff202020),
           ),
@@ -171,6 +225,22 @@ class _TaktAppState extends State<TaktApp> {
           ? const Color(0xff101112)
           : const Color(0xfff4f4f4),
       fontFamily: 'sans',
+      sliderTheme: SliderThemeData(
+        activeTrackColor: control,
+        thumbColor: control,
+        inactiveTrackColor: ink.withValues(alpha: .15),
+        overlayColor: control.withValues(alpha: .1),
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: dark
+            ? const Color(0xff252627)
+            : const Color(0xfff4f4f4),
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+      ),
     );
     return MaterialApp(
       // Super+Q invokes full exit, including while a text field has keyboard focus.
@@ -179,6 +249,26 @@ class _TaktAppState extends State<TaktApp> {
           const SingleActivator(LogicalKeyboardKey.keyQ, meta: true): () {
             widget.exit?.call();
           },
+          const _PlaybackActivator(LogicalKeyboardKey.space): () =>
+              _shortcut(() => queue.toggle()),
+          const _PlaybackActivator(LogicalKeyboardKey.arrowLeft): () =>
+              _shortcut(() => _seekBy(-1)),
+          const _PlaybackActivator(LogicalKeyboardKey.arrowRight): () =>
+              _shortcut(() => _seekBy(1)),
+          const _PlaybackActivator(
+            LogicalKeyboardKey.arrowLeft,
+            control: true,
+          ): () =>
+              _shortcut(() => queue.previous()),
+          const _PlaybackActivator(
+            LogicalKeyboardKey.arrowRight,
+            control: true,
+          ): () =>
+              _shortcut(() => queue.next()),
+          const _PlaybackActivator(LogicalKeyboardKey.arrowUp): () =>
+              _shortcut(() => _volumeBy(5)),
+          const _PlaybackActivator(LogicalKeyboardKey.arrowDown): () =>
+              _shortcut(() => _volumeBy(-5)),
         },
         child: Focus(autofocus: true, child: child!),
       ),
@@ -197,12 +287,71 @@ class _TaktAppState extends State<TaktApp> {
               child: Column(
                 children: [
                   Expanded(
-                    child: Row(
-                      children: [
-                        _sidebar(ctx),
-                        const SizedBox(width: 20),
-                        Expanded(child: _body(ctx)),
-                      ],
+                    child: LayoutBuilder(
+                      builder: (c, area) {
+                        final panel = SettingsPanel(
+                          key: const Key('settings-panel'),
+                          settings: settings,
+                          library: library,
+                          save: saveSettings,
+                          close: () => setState(() => settingsOpen = false),
+                          chooseFolder: chooseFolder,
+                          quit: widget.exit,
+                        );
+                        final wide = area.maxWidth >= 1000;
+                        return Stack(
+                          children: [
+                            Row(
+                              children: [
+                                _sidebar(ctx),
+                                const SizedBox(width: 20),
+                                Expanded(
+                                  child: animatedPage(
+                                    KeyedSubtree(
+                                      key: ValueKey(
+                                        '$viewKey:$showQueue:$folders:$folder',
+                                      ),
+                                      child: _body(ctx),
+                                    ),
+                                  ),
+                                ),
+                                if (wide)
+                                  AnimatedSize(
+                                    duration: interfaceDuration,
+                                    curve: Curves.easeOutCubic,
+                                    alignment: Alignment.centerRight,
+                                    child: settingsOpen
+                                        ? Padding(
+                                            padding: const EdgeInsets.only(
+                                              left: 16,
+                                            ),
+                                            child: SizedBox(
+                                              width: 360,
+                                              child: animatedPage(panel),
+                                            ),
+                                          )
+                                        : const SizedBox.shrink(),
+                                  ),
+                              ],
+                            ),
+                            if (!wide)
+                              Positioned(
+                                top: 0,
+                                bottom: 0,
+                                right: 0,
+                                width: math.min(380, area.maxWidth - 76),
+                                child: IgnorePointer(
+                                  ignoring: !settingsOpen,
+                                  child: animatedPage(
+                                    settingsOpen
+                                        ? panel
+                                        : const SizedBox.shrink(),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        );
+                      },
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -220,26 +369,11 @@ class _TaktAppState extends State<TaktApp> {
   Widget _glass(
     Widget child, {
     BorderRadius radius = const BorderRadius.all(Radius.circular(22)),
-  }) => ClipRRect(
-    borderRadius: radius,
-    child: BackdropFilter(
-      filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: radius,
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Colors.white.withValues(alpha: dark ? 0.14 : 0.8),
-              Colors.white.withValues(alpha: dark ? 0.03 : 0.3),
-            ],
-          ),
-          border: Border.all(color: Colors.white.withValues(alpha: .25)),
-        ),
-        child: child,
-      ),
-    ),
+  }) => GlassSurface(
+    dark: dark,
+    enabled: settings['glass'] != false,
+    radius: radius.topLeft.x,
+    child: child,
   );
   // Left function panel; its bottom section places settings above playback controls.
   Widget _sidebar(BuildContext ctx) => SizedBox(
@@ -250,48 +384,86 @@ class _TaktAppState extends State<TaktApp> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
-              child: MediaQuery.sizeOf(ctx).width < 650
-                  ? const Center(
-                      child: Text('T', style: TextStyle(fontSize: 24)),
-                    )
-                  : const Text(
-                      'Takt',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: -1,
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 16,
+                        horizontal: 8,
                       ),
+                      child: MediaQuery.sizeOf(ctx).width < 650
+                          ? const Center(
+                              child: Text('T', style: TextStyle(fontSize: 24)),
+                            )
+                          : const Text(
+                              'Takt',
+                              style: TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.w500,
+                                letterSpacing: -1,
+                              ),
+                            ),
                     ),
+                    _nav(
+                      ctx,
+                      Icons.music_note,
+                      tr('Моя музыка', 'My music'),
+                      () {
+                        setState(() {
+                          folders = false;
+                          folder = null;
+                          playlist = null;
+                          showQueue = false;
+                          showFavorites = false;
+                          selected.clear();
+                        });
+                      },
+                    ),
+                    _nav(
+                      ctx,
+                      Icons.star_outline,
+                      tr('Избранное', 'Favorites'),
+                      () {
+                        setState(() {
+                          showFavorites = true;
+                          showQueue = false;
+                          folders = false;
+                          playlist = null;
+                          folder = null;
+                          selected.clear();
+                        });
+                      },
+                    ),
+                    _nav(
+                      ctx,
+                      Icons.folder_outlined,
+                      tr('Папки', 'Folders'),
+                      () {
+                        setState(() {
+                          folders = true;
+                          playlist = null;
+                          folder = null;
+                          showQueue = false;
+                          showFavorites = false;
+                          selected.clear();
+                        });
+                      },
+                    ),
+                    _nav(
+                      ctx,
+                      Icons.playlist_add,
+                      tr('Новый плейлист', 'New playlist'),
+                      () {
+                        setState(() => creating = !creating);
+                      },
+                    ),
+                  ],
+                ),
+              ),
             ),
-            _nav(ctx, Icons.music_note, tr('Моя музыка', 'My music'), () {
-              setState(() {
-                folders = false;
-                folder = null;
-                playlist = null;
-                showQueue = false;
-                selected.clear();
-              });
-            }),
-            _nav(ctx, Icons.folder_outlined, tr('Папки', 'Folders'), () {
-              setState(() {
-                folders = true;
-                playlist = null;
-                folder = null;
-                showQueue = false;
-                selected.clear();
-              });
-            }),
-            _nav(
-              ctx,
-              Icons.playlist_add,
-              tr('Новый плейлист', 'New playlist'),
-              () {
-                setState(() => creating = !creating);
-              },
-            ),
-            const Spacer(),
             _nav(
               ctx,
               Icons.settings_outlined,
@@ -331,6 +503,8 @@ class _TaktAppState extends State<TaktApp> {
     final rows = shown;
     final heading = showQueue
         ? tr('Текущая очередь', 'Current queue')
+        : showFavorites
+        ? tr('Избранное', 'Favorites')
         : folders
         ? tr('Папки', 'Folders')
         : playlist == null
@@ -345,13 +519,15 @@ class _TaktAppState extends State<TaktApp> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Flexible(
-                child: Text(
-                  heading,
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w500,
+                child: DragToMoveArea(
+                  child: Text(
+                    heading,
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               const SizedBox(width: 12),
@@ -418,7 +594,7 @@ class _TaktAppState extends State<TaktApp> {
             ),
           )
         else ...[
-          if (!showQueue && !folders)
+          if (!showQueue && !folders && !showFavorites)
             Wrap(
               spacing: 6,
               runSpacing: 6,
@@ -455,47 +631,56 @@ class _TaktAppState extends State<TaktApp> {
               ],
             ),
           const SizedBox(height: 12),
-          if (creating)
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    key: const Key('playlist-create'),
-                    controller: playlistName,
-                    autofocus: true,
-                    decoration: InputDecoration(
-                      hintText: tr('Название плейлиста', 'Playlist name'),
-                      border: const OutlineInputBorder(),
+          AnimatedSize(
+            duration: interfaceDuration,
+            curve: Curves.easeOutCubic,
+            child: animatedPage(
+              creating
+                  ? Row(
+                      key: const ValueKey("playlist-form"),
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            key: const Key('playlist-create'),
+                            controller: playlistName,
+                            autofocus: true,
+                            decoration: InputDecoration(
+                              hintText: tr(
+                                'Название плейлиста',
+                                'Playlist name',
+                              ),
+                              border: const OutlineInputBorder(),
+                            ),
+                            onSubmitted: (_) => _createPlaylist(),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: _createPlaylist,
+                          child: Text(tr('Создать', 'Create')),
+                        ),
+                        IconButton(
+                          onPressed: () => setState(() => creating = false),
+                          icon: const Icon(Icons.close),
+                        ),
+                      ],
+                    )
+                  : TextField(
+                      key: const Key('track-search'),
+                      controller: search,
+                      onChanged: (_) => changed(),
+                      decoration: InputDecoration(
+                        hintText: tr('Поиск треков', 'Search tracks'),
+                        prefixIcon: const Icon(Icons.search, size: 20),
+                        filled: true,
+                        fillColor: Theme.of(ctx).colorScheme.surface,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
                     ),
-                    onSubmitted: (_) => _createPlaylist(),
-                  ),
-                ),
-                TextButton(
-                  onPressed: _createPlaylist,
-                  child: Text(tr('Создать', 'Create')),
-                ),
-                IconButton(
-                  onPressed: () => setState(() => creating = false),
-                  icon: const Icon(Icons.close),
-                ),
-              ],
-            )
-          else
-            TextField(
-              key: const Key('track-search'),
-              controller: search,
-              onChanged: (_) => changed(),
-              decoration: InputDecoration(
-                hintText: tr('Поиск треков', 'Search tracks'),
-                prefixIcon: const Icon(Icons.search, size: 20),
-                filled: true,
-                fillColor: Theme.of(ctx).colorScheme.surface,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide.none,
-                ),
-              ),
             ),
+          ),
           if (folders && folder != null)
             SizedBox(
               height: 44,
@@ -546,12 +731,22 @@ class _TaktAppState extends State<TaktApp> {
                   icon: const Icon(Icons.arrow_back),
                 ),
               PopupMenuButton<String>(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                color: dark ? const Color(0xff252627) : const Color(0xfff4f4f4),
+                surfaceTintColor: Colors.transparent,
+                popUpAnimationStyle: AnimationStyle(
+                  duration: interfaceDuration,
+                  reverseDuration: interfaceDuration,
+                  curve: Curves.easeOutCubic,
+                ),
                 icon: const Icon(Icons.sort),
                 onSelected: (v) {
                   if (v == 'name') {
-                    widget.store.write('manual:${playlist ?? 'all'}', false);
+                    widget.store.write('manual:$viewKey', false);
                   } else {
-                    widget.store.write('manual:${playlist ?? 'all'}', true);
+                    widget.store.write('manual:$viewKey', true);
                   }
                   changed();
                 },
@@ -571,19 +766,23 @@ class _TaktAppState extends State<TaktApp> {
           Expanded(
             child: rows.isEmpty
                 ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.library_music_outlined, size: 40),
-                        const SizedBox(height: 16),
-                        Text(tr('Здесь пока нет музыки', 'No music here yet')),
-                        const SizedBox(height: 12),
-                        TextButton.icon(
-                          onPressed: chooseFolder,
-                          icon: const Icon(Icons.folder_open),
-                          label: Text(tr('Выбрать папку', 'Choose folder')),
-                        ),
-                      ],
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.library_music_outlined, size: 40),
+                          const SizedBox(height: 16),
+                          Text(
+                            tr('Здесь пока нет музыки', 'No music here yet'),
+                          ),
+                          const SizedBox(height: 12),
+                          TextButton.icon(
+                            onPressed: chooseFolder,
+                            icon: const Icon(Icons.folder_open),
+                            label: Text(tr('Выбрать папку', 'Choose folder')),
+                          ),
+                        ],
+                      ),
                     ),
                   )
                 : ReorderableListView.builder(
@@ -613,20 +812,19 @@ class _TaktAppState extends State<TaktApp> {
                         final base = library
                             .visible(
                               playlist: playlist,
+                              favoritesOnly: showFavorites,
                               manual:
-                                  widget.store.read(
-                                    'manual:${playlist ?? 'all'}',
-                                  ) ==
-                                  true,
+                                  widget.store.read('manual:$viewKey') == true,
                             )
                             .map((t) => t.id)
                             .toList();
                         library.reorder(
                           ids,
                           playlist: playlist,
+                          favoritesOnly: showFavorites,
                           baseOrder: base,
                         );
-                        widget.store.write('manual:${playlist ?? 'all'}', true);
+                        widget.store.write('manual:$viewKey', true);
                       }
                       changed();
                     },
@@ -668,6 +866,12 @@ class _TaktAppState extends State<TaktApp> {
   void _createPlaylist() {
     if (playlistName.text.trim().isEmpty) return;
     playlist = library.createPlaylist(playlistName.text);
+    showFavorites = false;
+    showQueue = false;
+    folders = false;
+    folder = null;
+    selected.clear();
+    search.clear();
     playlistName.clear();
     setState(() => creating = false);
   }
@@ -791,11 +995,29 @@ class _TaktAppState extends State<TaktApp> {
                 'Menu. Hold to move',
               ),
               button: true,
-              child: PopupMenuButton<String>(
-                tooltip: '',
-                icon: const Icon(Icons.menu, size: 20),
-                onSelected: (action) => _trackAction(ctx, action, [t.id]),
-                itemBuilder: (_) => _actions(),
+              child: Builder(
+                builder: (buttonCtx) => IconButton(
+                  icon: const Icon(Icons.menu, size: 20),
+                  onPressed: () async {
+                    final action = await showGlassMenu<String>(
+                      context: ctx,
+                      anchor: buttonCtx,
+                      dark: dark,
+                      glass: settings['glass'] != false,
+                      estimatedHeight: 520,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: _actions(t),
+                        ),
+                      ),
+                    );
+                    if (action != null && ctx.mounted) {
+                      await _trackAction(ctx, action, [t.id]);
+                    }
+                  },
+                ),
               ),
             ),
           ),
@@ -804,39 +1026,60 @@ class _TaktAppState extends State<TaktApp> {
     ),
   );
   // Track menu entries; their string values are handled by _trackAction.
-  List<PopupMenuEntry<String>> _actions() => [
-    PopupMenuItem(
-      value: 'next',
-      child: Text(tr('Играть следующим', 'Play next')),
+  PopupMenuItem<String> _menuItem(String value, IconData icon, String label) =>
+      PopupMenuItem(
+        value: value,
+        child: Row(
+          children: [
+            Icon(icon, size: 20),
+            const SizedBox(width: 12),
+            Expanded(child: Text(label)),
+          ],
+        ),
+      );
+  List<PopupMenuEntry<String>> _actions([Track? track]) => [
+    _menuItem(
+      'queue',
+      Icons.playlist_add,
+      tr('Добавить в очередь', 'Add to queue'),
     ),
-    PopupMenuItem(
-      value: 'queue',
-      child: Text(tr('Добавить в очередь', 'Add to queue')),
+    _menuItem(
+      'playlist',
+      Icons.playlist_add,
+      tr('Добавить в плейлист', 'Add to playlist'),
     ),
-    PopupMenuItem(
-      value: 'playlist',
-      child: Text(tr('Добавить в плейлист', 'Add to playlist')),
+    _menuItem(
+      'favorite',
+      library.favorites.contains(track?.id) ? Icons.star : Icons.star_outline,
+      library.favorites.contains(track?.id)
+          ? tr('Убрать из избранного', 'Remove from favorites')
+          : tr('Добавить в избранное', 'Add to favorites'),
     ),
-    PopupMenuItem(value: 'select', child: Text(tr('Выделить', 'Select'))),
-    PopupMenuItem(value: 'rename', child: Text(tr('Переименовать', 'Rename'))),
-    PopupMenuItem(
-      value: 'art',
-      child: Text(tr('Изменить обложку', 'Change artwork')),
+    _menuItem('select', Icons.check, tr('Выделить', 'Select')),
+    _menuItem('rename', Icons.edit_outlined, tr('Переименовать', 'Rename')),
+    _menuItem(
+      'art',
+      Icons.image_outlined,
+      tr('Изменить обложку', 'Change artwork'),
     ),
     if (playlist != null)
-      PopupMenuItem(
-        value: 'remove',
-        child: Text(tr('Убрать из плейлиста', 'Remove from playlist')),
+      _menuItem(
+        'remove',
+        Icons.playlist_remove,
+        tr('Убрать из плейлиста', 'Remove from playlist'),
       ),
     if (showQueue)
-      PopupMenuItem(
-        value: 'removequeue',
-        child: Text(tr('Убрать из очереди', 'Remove from queue')),
+      _menuItem(
+        'removequeue',
+        Icons.playlist_remove,
+        tr('Убрать из очереди', 'Remove from queue'),
       ),
-    PopupMenuItem(value: 'info', child: Text(tr('Сведения', 'Details'))),
-    PopupMenuItem(
-      value: 'delete',
-      child: Text(tr('Удалить с устройства', 'Delete from device')),
+    _menuItem('info', Icons.info_outline, tr('Сведения', 'Details')),
+    const PopupMenuDivider(),
+    _menuItem(
+      'delete',
+      Icons.delete_outline,
+      tr('Удалить с устройства', 'Delete from device'),
     ),
   ];
   // Shared name/color input dialog; cancellation returns null.
@@ -846,7 +1089,7 @@ class _TaktAppState extends State<TaktApp> {
     String initial,
   ) async {
     final controller = TextEditingController(text: initial);
-    final result = await showDialog<String>(
+    final result = await showTaktDialog<String>(
       context: ctx,
       builder: (c) => AlertDialog(
         title: Text(title),
@@ -867,13 +1110,17 @@ class _TaktAppState extends State<TaktApp> {
         ],
       ),
     );
-    controller.dispose();
+    // The outgoing dialog still owns its field during the reverse transition.
+    Future<void>.delayed(
+      interfaceDuration + const Duration(milliseconds: 50),
+      controller.dispose,
+    );
     return result;
   }
 
   // Rename/delete a playlist without physically deleting its music.
   Future<void> _playlistMenu(BuildContext ctx, Playlist p) async {
-    final action = await showDialog<String>(
+    final action = await showTaktDialog<String>(
       context: ctx,
       builder: (c) => SimpleDialog(
         title: Text(p.name),
@@ -906,7 +1153,7 @@ class _TaktAppState extends State<TaktApp> {
 
   // Batch actions reuse the same handler as individual track actions.
   Future<void> _batchMenu(BuildContext ctx) async {
-    final action = await showDialog<String>(
+    final action = await showTaktDialog<String>(
       context: ctx,
       builder: (c) => SimpleDialog(
         title: Text(tr('Выбранные треки', 'Selected tracks')),
@@ -967,6 +1214,9 @@ class _TaktAppState extends State<TaktApp> {
                 : tr('Добавлено: $added', 'Added: $added'),
           );
           break;
+        case 'favorite':
+          library.toggleFavorite(ids);
+          break;
         case 'select':
           setState(() => selected.addAll(ids));
           break;
@@ -979,13 +1229,16 @@ class _TaktAppState extends State<TaktApp> {
           if (name != null) library.rename(t.id, name);
           break;
         case 'art':
-          final result = await FilePicker.pickFile(type: FileType.image);
-          if (result?.path != null) {
-            await library.setArtwork(t.id, result!.path!);
-          }
+          final path = await const MethodChannel('takt/artwork_picker')
+              .invokeMethod<String>('pick', {
+                'title': tr('Выбрать обложку', 'Choose artwork'),
+                'cancel': tr('Отмена', 'Cancel'),
+                'open': tr('Открыть', 'Open'),
+              });
+          if (path != null) await library.setArtwork(t.id, path);
           break;
         case 'playlist':
-          final choice = await showDialog<String>(
+          final choice = await showTaktDialog<String>(
             context: ctx,
             builder: (c) => SimpleDialog(
               title: Text(tr('Выбрать плейлист', 'Choose playlist')),
@@ -1027,7 +1280,7 @@ class _TaktAppState extends State<TaktApp> {
           }
           break;
         case 'info':
-          await showDialog<void>(
+          await showTaktDialog<void>(
             context: ctx,
             builder: (c) => AlertDialog(
               title: Text(t.title),
@@ -1042,7 +1295,7 @@ class _TaktAppState extends State<TaktApp> {
           );
           break;
         case 'delete':
-          final confirmed = await showDialog<bool>(
+          final confirmed = await showTaktDialog<bool>(
             context: ctx,
             builder: (c) => AlertDialog(
               title: Text(
@@ -1195,39 +1448,47 @@ class _TaktAppState extends State<TaktApp> {
       ],
     );
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Theme.of(ctx).colorScheme.surface,
         borderRadius: BorderRadius.circular(32),
       ),
       child: LayoutBuilder(
         builder: (ctx, size) {
-          if (size.maxWidth < 600) return center;
+          if (size.maxWidth < 600) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (settings['visualizerEnabled'] != false)
+                  SizedBox(height: 24, width: 110, child: _signal(ink)),
+                center,
+              ],
+            );
+          }
           return Row(
             children: [
-              Transform.translate(
-                offset: const Offset(24, 0),
-                child: GestureDetector(
-                  onTap: () => _queueMenu(ctx),
-                  child: _glass(
-                    _art(current, size: 96),
-                    radius: BorderRadius.circular(12),
+              SizedBox(
+                width: 120,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: GestureDetector(
+                    onTap: () => _queueMenu(ctx),
+                    child: _glass(
+                      _art(current, size: 96),
+                      radius: BorderRadius.circular(12),
+                    ),
                   ),
                 ),
               ),
               const SizedBox(width: 28),
               Expanded(child: center),
               const SizedBox(width: 28),
-              Transform.translate(
-                offset: const Offset(-24, 0),
-                child: SizedBox(
-                  width: 76,
-                  height: 42,
-                  child: WaveSignal(
-                    values: widget.amplitudes?.call() ?? [],
-                    color: accent,
-                  ),
-                ),
+              SizedBox(
+                width: 120,
+                height: 60,
+                child: settings['visualizerEnabled'] != false
+                    ? _signal(ink)
+                    : null,
               ),
             ],
           );
@@ -1237,6 +1498,15 @@ class _TaktAppState extends State<TaktApp> {
   }
 
   // Convert pointer coordinates to playback position; SeekPainter controls the appearance.
+  Widget _signal(Color ink) => visuals.WaveSignal(
+    values: widget.amplitudes?.call() ?? [],
+    color: settings['visualizerColor'] == null
+        ? ink
+        : Color(settings['visualizerColor']),
+    bars: settings['visualizerStyle'] == 'bars',
+    smoothness: (settings['visualizerSmoothness'] as num? ?? .5).toDouble(),
+  );
+
   Widget _seek(BuildContext ctx) => LayoutBuilder(
     builder: (ctx, size) {
       final total = queue.current?.seconds ?? 0;
@@ -1283,51 +1553,48 @@ class _TaktAppState extends State<TaktApp> {
   );
   // Volume popup updates the engine and persists the chosen setting.
   Future<void> _volume(BuildContext ctx) async {
-    final box = ctx.findRenderObject() as RenderBox;
-    final offset = box.localToGlobal(Offset.zero);
-    await showMenu<void>(
+    await showGlassMenu<void>(
       context: ctx,
-      position: RelativeRect.fromLTRB(
-        offset.dx - 100,
-        offset.dy - 100,
-        MediaQuery.sizeOf(ctx).width - offset.dx,
-        0,
-      ),
-      items: [
-        PopupMenuItem(
-          enabled: false,
-          child: StatefulBuilder(
-            builder: (c, update) => SizedBox(
-              width: 180,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '${tr('Громкость', 'Volume')} ${(settings['volume'] as num? ?? 70).round()}%',
-                  ),
-                  Slider(
-                    value: (settings['volume'] as num? ?? 70).toDouble(),
-                    min: 0,
-                    max: 100,
-                    onChanged: (v) {
-                      settings['volume'] = v;
-                      queue.engine.volume(v);
-                      saveSettings();
-                      update(() {});
-                    },
-                  ),
-                ],
+      anchor: ctx,
+      dark: dark,
+      glass: settings['glass'] != false,
+      width: 250,
+      estimatedHeight: 88,
+      above: true,
+      child: StatefulBuilder(
+        builder: (c, update) => Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              const Icon(Icons.volume_up_outlined, size: 20),
+              Expanded(
+                child: Slider(
+                  key: const Key('volume-slider'),
+                  value: (settings['volume'] as num? ?? 70).toDouble(),
+                  min: 0,
+                  max: 100,
+                  onChanged: (v) {
+                    settings['volume'] = v;
+                    queue.engine.volume(v);
+                    saveSettings();
+                    update(() {});
+                  },
+                ),
               ),
-            ),
+              Text(
+                '${(settings['volume'] as num? ?? 70).round()}%',
+                style: const TextStyle(fontSize: 12),
+              ),
+            ],
           ),
         ),
-      ],
+      ),
     );
   }
 
   // Switch the main area to the current queue and reset conflicting filters.
   Future<void> _queueMenu(BuildContext ctx) async {
-    await showDialog<void>(
+    await showTaktDialog<void>(
       context: ctx,
       builder: (c) => SimpleDialog(
         children: [
@@ -1349,172 +1616,8 @@ class _TaktAppState extends State<TaktApp> {
   }
 
   // Settings dialog: language, timeline, tray, online covers, accent, sources and full exit.
-  Future<void> _settings(BuildContext ctx) async {
-    await showDialog<void>(
-      context: ctx,
-      builder: (dialogCtx) => StatefulBuilder(
-        builder: (c, update) => AlertDialog(
-          title: Text(tr('Настройки', 'Settings')),
-          content: SizedBox(
-            width: 440,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  DropdownButtonFormField<String>(
-                    initialValue: en ? 'en' : 'ru',
-                    decoration: InputDecoration(
-                      labelText: tr('Язык', 'Language'),
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: 'ru', child: Text('Русский')),
-                      DropdownMenuItem(value: 'en', child: Text('English')),
-                    ],
-                    onChanged: (v) {
-                      settings['locale'] = v;
-                      saveSettings();
-                      update(() {});
-                    },
-                  ),
-                  SwitchListTile(
-                    title: Text(tr('Волнистая шкала', 'Wavy timeline')),
-                    value: settings['wave'] == true,
-                    onChanged: (v) {
-                      settings['wave'] = v;
-                      saveSettings();
-                      update(() {});
-                    },
-                  ),
-                  SwitchListTile(
-                    title: Text(tr('Закрывать в трей', 'Close to tray')),
-                    value: settings['closeToTray'] != false,
-                    onChanged: (v) {
-                      settings['closeToTray'] = v;
-                      saveSettings();
-                      update(() {});
-                    },
-                  ),
-                  SwitchListTile(
-                    title: Text(
-                      tr('Искать обложки в интернете', 'Find artwork online'),
-                    ),
-                    subtitle: Text(
-                      tr(
-                        'Отправляются исполнитель, альбом и название.',
-                        'Artist, album and title are sent.',
-                      ),
-                    ),
-                    value: settings['onlineArtwork'] == true,
-                    onChanged: (v) {
-                      settings['onlineArtwork'] = v;
-                      saveSettings();
-                      update(() {});
-                    },
-                  ),
-                  ListTile(
-                    title: Text(tr('Акцентный цвет', 'Accent color')),
-                    subtitle: Wrap(
-                      spacing: 8,
-                      children: [
-                        for (final color in [
-                          0xff777777,
-                          0xffb77777,
-                          0xff788bad,
-                          0xff709983,
-                          0xffad8c68,
-                          0xffa07ab2,
-                        ])
-                          InkWell(
-                            onTap: () {
-                              settings['accent'] = color;
-                              saveSettings();
-                              update(() {});
-                            },
-                            child: Container(
-                              width: 28,
-                              height: 28,
-                              decoration: BoxDecoration(
-                                color: Color(color),
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  TextButton.icon(
-                    icon: const Icon(Icons.palette_outlined),
-                    label: Text(tr('Свой цвет', 'Custom color')),
-                    onPressed: () async {
-                      final value = await _textDialog(
-                        ctx,
-                        tr(
-                          'Цвет HEX, например #808080',
-                          'HEX color, e.g. #808080',
-                        ),
-                        '#${(accent.toARGB32() & 0xffffff).toRadixString(16).padLeft(6, '0')}',
-                      );
-                      if (value != null) {
-                        final cleaned = value.trim().replaceFirst('#', '');
-                        if (RegExp(r'^[0-9a-fA-F]{6}$').hasMatch(cleaned)) {
-                          settings['accent'] =
-                              0xff000000 | int.parse(cleaned, radix: 16);
-                          saveSettings();
-                          if (c.mounted) update(() {});
-                        } else {
-                          message(
-                            tr(
-                              'Нужно шесть символов HEX',
-                              'Enter six HEX characters',
-                            ),
-                          );
-                        }
-                      }
-                    },
-                  ),
-                  for (final path in library.sources)
-                    ListTile(
-                      dense: true,
-                      title: Text(path, style: const TextStyle(fontSize: 12)),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.remove_circle_outline),
-                        onPressed: () {
-                          library.sources.remove(path);
-                          library.persist();
-                          library.scan();
-                          update(() {});
-                        },
-                      ),
-                    ),
-                  TextButton.icon(
-                    onPressed: () async {
-                      await chooseFolder();
-                      update(() {});
-                    },
-                    icon: const Icon(Icons.folder_open),
-                    label: Text(
-                      tr('Добавить музыкальную папку', 'Add music folder'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(c),
-              child: Text(tr('Закрыть', 'Close')),
-            ),
-            if (widget.exit != null)
-              TextButton(
-                onPressed: widget.exit,
-                child: Text(tr('Выйти из Takt', 'Quit Takt')),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
+  void _settings(BuildContext ctx) =>
+      setState(() => settingsOpen = !settingsOpen);
 }
 
 // Straight/wavy timeline and contrasting handle; change their geometry and colors here.
@@ -1553,72 +1656,36 @@ class SeekPainter extends CustomPainter {
 }
 
 // Solid visualizer silhouette from amplitude values; change its shape and fill here.
-class WavePainter extends CustomPainter {
-  final List<double> values;
-  final Color color;
-  WavePainter(this.values, this.color);
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (values.length < 2) {
-      canvas.drawLine(
-        Offset(0, size.height / 2),
-        Offset(size.width, size.height / 2),
-        Paint()
-          ..color = color
-          ..strokeWidth = 2,
-      );
-      return;
-    }
-    final path = Path();
-    for (int i = 0; i < values.length; i++) {
-      final x = i / (values.length - 1) * size.width,
-          y = size.height / 2 - values[i].clamp(0.0, 1.0) * size.height / 2;
-      if (i == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
-      }
-    }
-    for (int i = values.length - 1; i >= 0; i--) {
-      path.lineTo(
-        i / (values.length - 1) * size.width,
-        size.height / 2 + values[i].clamp(0.0, 1.0) * size.height / 2,
-      );
-    }
-    path.close();
-    canvas.drawPath(path, Paint()..color = color);
-  }
-
-  @override
-  bool shouldRepaint(covariant WavePainter old) =>
-      old.values != values || old.color != color;
+class WavePainter extends visuals.WavePainter {
+  WavePainter(super.values, super.color, {super.bars});
 }
 
 // Smooth interpolation between actual amplitude arrays without random signal generation.
-class SignalTween extends Tween<List<double>> {
+class SignalTween extends visuals.SignalTween {
   SignalTween({super.end});
-  @override
-  List<double> lerp(double t) {
-    final a = begin ?? [], b = end ?? [];
-    final length = math.max(a.length, b.length);
-    return List.generate(length, (i) {
-      final from = i < a.length ? a[i] : 0.0, to = i < b.length ? b[i] : 0.0;
-      return from + (to - from) * t;
-    });
-  }
 }
 
 // Animate new real data; TweenAnimationBuilder duration determines smoothness.
-class WaveSignal extends StatelessWidget {
-  final List<double> values;
-  final Color color;
-  const WaveSignal({super.key, required this.values, required this.color});
+class _PlaybackActivator extends SingleActivator {
+  const _PlaybackActivator(super.trigger, {super.control});
+
   @override
-  // Smoothly animate incoming amplitudes before drawing the visualizer silhouette.
-  Widget build(BuildContext context) => TweenAnimationBuilder<List<double>>(
-    tween: SignalTween(end: values),
-    duration: const Duration(milliseconds: 180),
-    builder: (context, signal, child) =>
-        CustomPaint(painter: WavePainter(signal, color)),
-  );
+  bool accepts(KeyEvent event, HardwareKeyboard state) {
+    final focused = FocusManager.instance.primaryFocus?.context;
+    if (focused?.widget is EditableText ||
+        focused?.findAncestorWidgetOfExactType<EditableText>() != null) {
+      return false;
+    }
+    return super.accepts(event, state);
+  }
+}
+
+class WaveSignal extends visuals.WaveSignal {
+  const WaveSignal({
+    super.key,
+    required super.values,
+    required super.color,
+    super.bars,
+    super.smoothness,
+  });
 }

@@ -17,6 +17,24 @@ class TestWindow implements DesktopWindow {
 }
 
 void main() {
+  test('tray visibility toggles window without changing playback', () async {
+    final store = TaktStore.memory(), window = TestWindow();
+    addTearDown(store.close);
+    final visibility = <bool>[];
+    final desktop = DesktopLifecycle(
+      store,
+      () async {},
+      () async {},
+      window: window,
+      onVisibility: visibility.add,
+    );
+    await desktop.toggleVisibility();
+    expect(window.hidden, isTrue);
+    expect(desktop.visible, isFalse);
+    await desktop.toggleVisibility();
+    expect(window.hidden, isFalse);
+    expect(visibility, [false, true]);
+  });
   test(
     'close hides only with accessible tray and never pauses music',
     () async {

@@ -27,7 +27,7 @@ void main() {
       );
       await tester.tap(find.byIcon(Icons.menu).first);
       await tester.pumpAndSettle();
-      expect(find.text('Играть следующим'), findsOneWidget);
+      expect(find.text('Добавить в очередь'), findsOneWidget);
       expect(store.read('manual:all'), isNull);
       await tester.tap(find.text('Выделить'));
       await tester.pumpAndSettle();

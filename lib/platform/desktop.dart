@@ -30,6 +30,29 @@ class DesktopLifecycle with WindowListener {
   final TaktStore store;
   final Future<void> Function() quit;
   final Future<void> Function() toggle;
+  final Future<void> Function()? next;
+  final Future<void> Function()? previous;
+  bool visible = true;
+  void _visibility(bool value) {
+    visible = value;
+    onVisibility?.call(value);
+    refreshLanguage();
+  }
+
+  Future<void> show() async {
+    await window.show();
+    _visibility(true);
+  }
+
+  Future<void> toggleVisibility() async {
+    if (visible) {
+      await window.hide();
+      _visibility(false);
+    } else {
+      await show();
+    }
+  }
+
   tray.TrayIcon? icon;
   tray.Menu? menu;
   final entries = <tray.MenuItem>[];
@@ -37,8 +60,20 @@ class DesktopLifecycle with WindowListener {
   void refreshLanguage() {
     final english = (store.read('settings') as Map?)?['locale'] == 'en';
     final labels = english
-        ? ['Show Takt', 'Play / Pause', 'Quit']
-        : ['Показать Takt', 'Пуск / Пауза', 'Выход'];
+        ? [
+            visible ? 'Hide Takt' : 'Show Takt',
+            'Previous track',
+            'Play / Pause',
+            'Next track',
+            'Quit',
+          ]
+        : [
+            visible ? 'Спрятать Takt' : 'Показать Takt',
+            'Предыдущий трек',
+            'Пуск / Пауза',
+            'Следующий трек',
+            'Выход',
+          ];
     for (var i = 0; i < entries.length; i++) {
       entries[i].label = labels[i];
     }
@@ -49,6 +84,8 @@ class DesktopLifecycle with WindowListener {
     this.quit,
     this.toggle, {
     this.onVisibility,
+    this.next,
+    this.previous,
     DesktopWindow? window,
     this.trayAvailable,
   }) : window = window ?? NativeDesktopWindow();
@@ -83,15 +120,10 @@ class DesktopLifecycle with WindowListener {
       icon!.setTitle('Takt');
       menu = tray.Menu.create();
       for (final item in [
-        (
-          'Показать Takt',
-          () async {
-            onVisibility?.call(true);
-            await windowManager.show();
-            await windowManager.focus();
-          },
-        ),
+        ('Показать Takt', toggleVisibility),
+        ('Предыдущий трек', previous ?? () async {}),
         ('Пуск / Пауза', toggle),
+        ('Следующий трек', next ?? () async {}),
         ('Выход', quit),
       ]) {
         final entry = tray.MenuItem.createWithLabelAndType(
@@ -107,9 +139,7 @@ class DesktopLifecycle with WindowListener {
       icon!.addListener((event) {
         if (event is tray.TrayIconClickedEvent ||
             event is tray.TrayIconDoubleClickedEvent) {
-          onVisibility?.call(true);
-          windowManager.show();
-          windowManager.focus();
+          show();
         }
       });
       refreshLanguage();
@@ -154,26 +184,26 @@ class DesktopLifecycle with WindowListener {
       return;
     }
     if (await (trayAvailable?.call() ?? _trayAvailable())) {
-      onVisibility?.call(false);
       await window.hide();
+      _visibility(false);
     } else {
-      await window.show();
+      await show();
     }
   }
 
   @override
   void onWindowMinimize() {
-    onVisibility?.call(false);
+    _visibility(false);
   }
 
   @override
   void onWindowRestore() {
-    onVisibility?.call(true);
+    _visibility(true);
   }
 
   @override
   void onWindowFocus() {
-    onVisibility?.call(true);
+    _visibility(true);
   }
 
   void dispose() {

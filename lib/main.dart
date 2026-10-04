@@ -14,6 +14,8 @@ import 'playback/queue.dart';
 import 'analysis/audio_analysis.dart';
 import 'ui/app.dart';
 import 'platform/desktop.dart';
+import 'platform/mpris.dart';
+import 'platform/audio_routes.dart';
 import 'artwork/artwork.dart';
 
 // Application entry: storage, library, audio, events, window and UI. See docs/code-guide.md.
@@ -47,7 +49,11 @@ Future<void> main() async {
   bool visible = true;
   engine.player.stream.playing.listen((value) {
     queue.updatePlaying(value);
-    analysis.setActive(value && visible);
+    analysis.setActive(
+      value &&
+          visible &&
+          (store.read('settings') as Map?)?['visualizerEnabled'] != false,
+    );
   });
   engine.player.stream.completed.listen((value) {
     if (value && engine.player.state.completed) {
@@ -74,6 +80,8 @@ Future<void> main() async {
   // Checkpoint the position every two seconds; full shutdown also saves it.
   final saver = Timer.periodic(const Duration(seconds: 2), (_) => queue.save());
   late DesktopLifecycle desktop;
+  TaktMpris? mpris;
+  HeadphoneMonitor? headphones;
   bool quitting = false;
   // Shared full exit for settings, tray, Super+Q and SIGTERM; repeated calls are ignored.
   Future<void> quit() async {
@@ -81,6 +89,8 @@ Future<void> main() async {
     quitting = true;
     saver.cancel();
     queue.save();
+    headphones?.dispose();
+    await mpris?.dispose();
     desktop.dispose();
     analysis.dispose();
     library.dispose();
@@ -96,9 +106,15 @@ Future<void> main() async {
     store,
     quit,
     queue.toggle,
+    next: queue.next,
+    previous: queue.previous,
     onVisibility: (value) {
       visible = value;
-      analysis.setActive(value && queue.playing);
+      analysis.setActive(
+        value &&
+            queue.playing &&
+            (store.read('settings') as Map?)?['visualizerEnabled'] != false,
+      );
     },
   );
   // Initial/minimum window size and title; adjust window dimensions here.
@@ -107,6 +123,7 @@ Future<void> main() async {
       size: Size(1080, 760),
       minimumSize: Size(620, 520),
       title: 'Takt',
+      titleBarStyle: TitleBarStyle.hidden,
       backgroundColor: Colors.transparent,
     ),
     () async {
@@ -114,6 +131,38 @@ Future<void> main() async {
       await windowManager.focus();
     },
   );
+  mpris = TaktMpris(
+    queue,
+    raise: desktop.show,
+    quit: quit,
+    volume: () => engine.player.state.volume / 100,
+    setVolume: (level) async {
+      final preferences = Map<String, dynamic>.from(
+        store.read('settings') as Map? ?? {},
+      );
+      preferences['volume'] = level * 100;
+      store.write('settings', preferences);
+      await engine.volume(level * 100);
+      queue.updatePosition(queue.position);
+    },
+  );
+  library.addListener(mpris.refresh);
+  engine.player.stream.volume.listen((_) => mpris?.refresh());
+  engine.player.stream.duration.listen((_) => mpris?.refresh());
+  unawaited(
+    mpris.start().catchError((Object error) {
+      library.reportError('Linux media integration: $error');
+    }),
+  );
+  headphones = HeadphoneMonitor(
+    enabled: () =>
+        (store.read('settings') as Map?)?['pauseOnHeadphonesDisconnect'] !=
+        false,
+    onDisconnect: () async {
+      if (queue.playing) await queue.stop();
+    },
+  );
+  unawaited(headphones.start());
   final artwork = ArtworkService('${directory.path}/artwork');
   bool artBusy = false;
   int permission = 0;
@@ -171,10 +220,26 @@ Future<void> main() async {
       queue: queue,
       store: store,
       amplitudes: () =>
-          visible ? analysis.frame(queue.position, queue.playing) : const [],
+          visible &&
+              (store.read('settings') as Map?)?['visualizerEnabled'] != false
+          ? analysis.frame(
+              queue.position,
+              queue.playing,
+              sensitivity:
+                  ((store.read('settings') as Map?)?['visualizerSensitivity']
+                              as num? ??
+                          1)
+                      .toDouble(),
+            )
+          : const [],
       exit: quit,
       onSettingsChanged: () {
         desktop.refreshLanguage();
+        analysis.setActive(
+          queue.playing &&
+              visible &&
+              (store.read('settings') as Map?)?['visualizerEnabled'] != false,
+        );
         updateArtwork();
       },
       promptForFolder: library.sources.isEmpty,

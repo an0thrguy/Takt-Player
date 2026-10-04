@@ -16,6 +16,7 @@ class MusicLibrary extends ChangeNotifier {
   late List<Track> tracks;
   late List<String> sources;
   late List<Playlist> playlists;
+  late Set<String> favorites;
   bool scanning = false;
   String? error;
   void reportError(String value) {
@@ -25,6 +26,7 @@ class MusicLibrary extends ChangeNotifier {
 
   Timer? timer;
   MusicLibrary(this.store, {this.artworkDirectory}) {
+    favorites = Set<String>.from(store.read('favorites') ?? []);
     tracks = [
       for (final j in store.read('tracks') ?? [])
         Track.fromJson(Map<String, dynamic>.from(j)),
@@ -40,9 +42,22 @@ class MusicLibrary extends ChangeNotifier {
     store.transaction(() {
       store.write('tracks', tracks.map((t) => t.toJson()).toList());
       store.write('sources', sources);
+      store.write('favorites', favorites.toList());
       store.write('playlists', playlists.map((p) => p.toJson()).toList());
     });
     notifyListeners();
+  }
+
+  // Batch add/remove is reversible and never edits or duplicates media files.
+  void toggleFavorite(Iterable<String> ids) {
+    final valid = ids.where((id) => tracks.any((t) => t.id == id)).toSet();
+    if (valid.isEmpty) return;
+    if (valid.every(favorites.contains)) {
+      favorites.removeAll(valid);
+    } else {
+      favorites.addAll(valid);
+    }
+    persist();
   }
 
   // Canonical paths prevent reconnecting the same directory through symbolic links.
@@ -278,14 +293,24 @@ class MusicLibrary extends ChangeNotifier {
   }
 
   // With filtering, baseOrder retains hidden track slots; global and playlist orders are independent.
-  void reorder(List<String> ids, {String? playlist, List<String>? baseOrder}) {
+  void reorder(
+    List<String> ids, {
+    String? playlist,
+    List<String>? baseOrder,
+    bool favoritesOnly = false,
+  }) {
     if (baseOrder != null) {
       var index = 0;
       ids = baseOrder
           .map((id) => ids.contains(id) ? ids[index++] : id)
           .toList();
     }
-    if (playlist != null) {
+    if (favoritesOnly) {
+      store.write('order:favorites', [
+        ...ids,
+        ...favorites.where((id) => !ids.contains(id)),
+      ]);
+    } else if (playlist != null) {
       final p = playlists.firstWhere((p) => p.id == playlist);
       p.ids = [...ids, ...p.ids.where((id) => !ids.contains(id))];
     } else {
@@ -303,14 +328,18 @@ class MusicLibrary extends ChangeNotifier {
     String? playlist,
     String? folder,
     bool manual = false,
+    bool favoritesOnly = false,
   }) {
-    final ids = playlist == null
+    final ids = favoritesOnly
+        ? List<String>.from(store.read('order:favorites') ?? [])
+        : playlist == null
         ? List<String>.from(store.read('order') ?? [])
         : playlists.firstWhere((p) => p.id == playlist).ids;
     final list = tracks
         .where(
           (t) =>
               t.available &&
+              (!favoritesOnly || favorites.contains(t.id)) &&
               (playlist == null || ids.contains(t.id)) &&
               (folder == null || t.path.startsWith('$folder/')) &&
               '${t.title} ${t.artist} ${t.album} ${t.path}'
