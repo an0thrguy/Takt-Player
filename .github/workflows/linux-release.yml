@@ -39,12 +39,18 @@ jobs:
           flutter test
           bash -n tool/package.sh tool/install-release.sh
       - name: Check native interface
-        run: dbus-run-session -- xvfb-run -a flutter test integration_test/approved_update_test.dart -d linux
+        run: |
+          dbus-run-session -- xvfb-run -a flutter test integration_test/approved_update_test.dart -d linux
+          dbus-run-session -- xvfb-run -a flutter test integration_test/customization_update_test.dart -d linux
+          dbus-run-session -- xvfb-run -a ./tool/test-artwork-native.sh
       - name: Build and package
         run: |
           flutter build linux --release
           ./tool/package.sh
           ldd build/linux/x64/release/bundle/takt > dist/DEPENDENCIES.txt
+          for library in build/linux/x64/release/bundle/lib/*.so; do
+            ldd "$library" >> dist/DEPENDENCIES.txt
+          done
           if grep -q 'not found' dist/DEPENDENCIES.txt; then exit 1; fi
           printf 'Built on Ubuntu 22.04 x86_64 with Flutter 3.47.6 and Dart 3.13.5.\n' > dist/BUILD-INFO.txt
       - uses: actions/upload-artifact@v4
@@ -68,4 +74,4 @@ jobs:
             echo "Release $tag already exists; choose a new version."
             exit 1
           fi
-          gh release create "$tag" dist/*.tar.gz dist/SHA256SUMS.txt dist/DEPENDENCIES.txt dist/BUILD-INFO.txt --target "$GITHUB_SHA" --title "Takt $version — Linux" --notes-file "docs/releases/$tag.md"
+          gh release create "$tag" dist/*.tar.gz dist/SHA256SUMS.txt dist/DEPENDENCIES.txt dist/BUILD-INFO.txt --target "$GITHUB_SHA" --title "Takt $version - Linux" --notes-file "docs/releases/$tag.md"

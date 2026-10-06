@@ -188,6 +188,7 @@ class MusicLibrary extends ChangeNotifier {
               album: tags['album'] ?? '',
               seconds: double.tryParse(tags['duration'] ?? '') ?? 0,
               signature: hash,
+              addedAt: DateTime.now().millisecondsSinceEpoch,
             ),
           );
         }

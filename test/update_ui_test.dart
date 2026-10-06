@@ -61,6 +61,8 @@ void main() {
         await tester.tap(visualizerToggle);
         await tester.pumpAndSettle();
       }
+      await tester.ensureVisible(find.text('Столбики'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Столбики'));
       await tester.pumpAndSettle();
       expect(store.read('settings')['visualizerStyle'], 'bars');
@@ -100,7 +102,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byIcon(Icons.playlist_add));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField).first, 'Road');
+      await tester.enterText(find.byKey(const Key('playlist-create')), 'Road');
+      await tester.pump();
       await tester.tap(find.text('Создать'));
       await tester.pumpAndSettle();
       expect(find.text('Road'), findsNWidgets(2));

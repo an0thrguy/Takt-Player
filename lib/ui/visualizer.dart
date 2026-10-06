@@ -1,4 +1,7 @@
 import 'dart:math' as math;
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 
 import 'package:flutter/material.dart';
 
@@ -15,34 +18,99 @@ class SignalTween extends Tween<List<double>> {
   }
 }
 
-class WaveSignal extends StatelessWidget {
+// Local scheduled interpolation caps all spectrum paints, including smoothing.
+class WaveSignal extends StatefulWidget {
   final List<double> values;
   final Color color;
   final bool bars;
+  final bool bottomAligned;
   final double smoothness;
+  final int refreshHz;
+  final List<double> Function()? sample;
   const WaveSignal({
     super.key,
     required this.values,
     required this.color,
     this.bars = false,
+    this.bottomAligned = false,
     this.smoothness = .5,
+    this.refreshHz = 30,
+    this.sample,
   });
   @override
-  Widget build(BuildContext context) => TweenAnimationBuilder<List<double>>(
-    tween: SignalTween(end: values),
-    duration: Duration(
-      milliseconds: (60 + smoothness.clamp(0, 1) * 200).round(),
+  State<WaveSignal> createState() => _WaveSignalState();
+}
+
+class _WaveSignalState extends State<WaveSignal> {
+  Timer? timer;
+  List<double> signal = [];
+  @override
+  void initState() {
+    super.initState();
+    signal = List.of(widget.values);
+    schedule();
+  }
+
+  void schedule() {
+    timer?.cancel();
+    timer = Timer.periodic(
+      Duration(microseconds: (1000000 / widget.refreshHz.clamp(1, 60)).ceil()),
+      (_) => tick(),
+    );
+  }
+
+  @override
+  void didUpdateWidget(WaveSignal old) {
+    super.didUpdateWidget(old);
+    if (old.refreshHz != widget.refreshHz) schedule();
+  }
+
+  void tick() {
+    final target = widget.sample?.call() ?? widget.values;
+    if (target.isEmpty) {
+      if (signal.isNotEmpty) setState(() => signal = []);
+      return;
+    }
+    final weight =
+        (1 / (1 + widget.smoothness.clamp(0, 1) * widget.refreshHz * .12))
+            .clamp(.05, 1.0);
+    final next = List<double>.generate(target.length, (i) {
+      final from = i < signal.length ? signal[i] : 0.0;
+      final to = target[i];
+      return (from - to).abs() < .001 ? to : from + (to - from) * weight;
+    });
+    if (!listEquals(next, signal)) setState(() => signal = next);
+  }
+
+  @override
+  void dispose() {
+    timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => RepaintBoundary(
+    child: CustomPaint(
+      painter: WavePainter(
+        signal,
+        widget.color,
+        bars: widget.bars,
+        bottomAligned: widget.bottomAligned,
+      ),
     ),
-    builder: (c, signal, _) =>
-        CustomPaint(painter: WavePainter(signal, color, bars: bars)),
   );
 }
 
 class WavePainter extends CustomPainter {
   final List<double> values;
   final Color color;
-  final bool bars;
-  WavePainter(this.values, this.color, {this.bars = false});
+  final bool bars, bottomAligned;
+  WavePainter(
+    this.values,
+    this.color, {
+    this.bars = false,
+    this.bottomAligned = false,
+  });
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()..color = color;
@@ -62,7 +130,10 @@ class WavePainter extends CustomPainter {
         canvas.drawRRect(
           RRect.fromRectAndRadius(
             Rect.fromCenter(
-              center: Offset((i + .5) * step, center),
+              center: Offset(
+                (i + .5) * step,
+                bottomAligned ? size.height - amplitude : center,
+              ),
               width: math.max(1, step * .55),
               height: math.max(1.2, amplitude * 2),
             ),
@@ -111,5 +182,8 @@ class WavePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant WavePainter old) =>
-      old.values != values || old.color != color || old.bars != bars;
+      old.values != values ||
+      old.color != color ||
+      old.bars != bars ||
+      old.bottomAligned != bottomAligned;
 }

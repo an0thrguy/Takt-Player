@@ -12,28 +12,54 @@ import '../core/track.dart';
 import '../library/library.dart';
 import '../library/delete_tracks.dart';
 import '../playback/queue.dart';
+import '../playback/sleep_timer.dart';
+import 'sleep_timer_dialog.dart';
+import 'compact_player.dart';
 import 'glass.dart';
+import 'playlist_dialog.dart';
+import 'volume_control.dart';
+import 'resizable_sidebar.dart';
+import 'window_close_button.dart';
+import 'appearance.dart';
+import 'appearance_editor.dart';
+import 'backdrop_layers.dart';
+import 'layout_preferences.dart';
+import 'layout_editor.dart';
+import '../library/library_views.dart';
+
+import 'package:path_provider/path_provider.dart';
+import 'package:crypto/crypto.dart';
+
+import 'presentation_preferences.dart';
+import 'presentation_scope.dart';
 import 'visualizer.dart' as visuals;
 import 'settings_panel.dart';
 
 // Root interface. Library/queue own data changes; the exit callback performs full shutdown.
 class TaktApp extends StatefulWidget {
   final VoidCallback? onSettingsChanged;
+  final ValueChanged<bool>? onVisualDemandChanged;
   final bool promptForFolder;
+  final SleepTimer? sleepTimer;
+  final Future<void> Function(bool compact, bool alwaysOnTop)? onCompactChanged;
   final MusicLibrary library;
   final TaktQueue queue;
   final TaktStore store;
   final List<double> Function()? amplitudes;
-  final Future<void> Function()? exit;
+  final Future<void> Function()? exit, close;
   const TaktApp({
     super.key,
     this.onSettingsChanged,
+    this.onVisualDemandChanged,
     this.promptForFolder = false,
+    this.sleepTimer,
+    this.onCompactChanged,
     required this.library,
     required this.queue,
     required this.store,
     this.amplitudes,
     this.exit,
+    this.close,
   });
   @override
   State<TaktApp> createState() => _TaktAppState();
@@ -45,16 +71,55 @@ class _TaktAppState extends State<TaktApp> {
   // Stored under settings; string keys must stay consistent with main.dart and DesktopLifecycle.
   late Map<String, dynamic> settings;
   final messenger = GlobalKey<ScaffoldMessengerState>();
-  final search = TextEditingController(),
-      playlistName = TextEditingController();
-  String? playlist, folder;
-  bool creating = false, folders = false, showQueue = false, volumeOpen = false;
+  final search = TextEditingController();
+  bool playlistDialogOpen = false;
+  String? playlist, folder, specialView;
+  String? groupId;
+  late final views = LibraryViews(widget.store);
+  String? lastPlayedId;
+  bool lastPlaying = false;
+  bool compact = false;
+  bool? layoutCollapsedDraft;
+  bool _compactChanging = false;
+  bool _opacityUnsupported = false;
+  double? _lastOpacity;
+  late final SleepTimer sleep =
+      widget.sleepTimer ??
+      SleepTimer(
+        pause: queue.stop,
+        quit: widget.exit ?? () async {},
+        setVolume: queue.engine.volume,
+        getVolume: () => (settings['volume'] as num? ?? 70).toDouble(),
+        onError: (e) => message(e.toString()),
+      );
+  bool layoutEditing = false;
+  Map<String, dynamic>? layoutDraft;
+  LayoutPreferences get layoutPreferences => LayoutPreferences.fromMap(
+    layoutDraft ??
+        (displaySettings['layout'] is Map
+            ? Map<String, dynamic>.from(displaySettings['layout'])
+            : {'sidebarWidth': settings['sidebarWidth'] ?? 178}),
+  );
+  bool folders = false, showQueue = false;
   bool showFavorites = false, settingsOpen = false;
-  String get viewKey => showFavorites ? 'favorites' : playlist ?? 'all';
+  String get viewKey =>
+      specialView ?? (showFavorites ? 'favorites' : playlist ?? 'all');
   final selected = <String>{};
-  bool get dark => settings['dark'] == true;
+  Map<String, dynamic>? appearancePreview;
+  bool appearanceDialogOpen = false;
+  Map<String, dynamic> get displaySettings => appearancePreview ?? settings;
+  bool get dark => displaySettings['dark'] == true;
+  AppearanceProfile get appearanceProfile =>
+      AppearanceDraft(displaySettings).profile(dark);
+  bool get customAppearance =>
+      displaySettings[dark ? 'appearanceDark' : 'appearanceLight'] is Map;
+
   bool get en => settings['locale'] == 'en';
-  Color get accent => Color(settings['accent'] ?? 0xff777777);
+  Color get accent => Color(
+    customAppearance
+        ? appearanceProfile.accent
+        : settings['accent'] ?? 0xff777777,
+  );
   // Keep Russian and English labels together; supply both translations for new text.
   String tr(String ru, String english) => en ? english : ru;
   @override
@@ -81,14 +146,40 @@ class _TaktAppState extends State<TaktApp> {
             'wave': false,
           },
     );
+    sleep.addListener(changed);
     library.addListener(changed);
-    queue.addListener(changed);
+    queue.addListener(queueChanged);
+    queueChanged();
     if (widget.promptForFolder) {
       WidgetsBinding.instance.addPostFrameCallback((_) => chooseFolder());
     }
   }
 
+  String _queueStamp = '';
+  void queueChanged() {
+    if (queue.playing &&
+        !queue.opening &&
+        queue.current != null &&
+        (!lastPlaying || lastPlayedId != queue.currentId)) {
+      views.recordPlay(queue.current!);
+      lastPlayedId = queue.currentId;
+      lastPlaying = true;
+    }
+    if (!queue.playing) lastPlaying = false;
+
+    final volume = (widget.store.read('settings') as Map?)?['volume'];
+    final stamp =
+        '${queue.currentId}:${queue.ids.join(',')}:${queue.mode}:${queue.playing}:${queue.opening}:$volume';
+    if (stamp != _queueStamp) {
+      _queueStamp = stamp;
+      changed();
+    }
+  }
+
+  void _notifyVisualDemand() =>
+      widget.onVisualDemandChanged?.call(visualizationDemand(displaySettings));
   void changed() {
+    _notifyVisualDemand();
     // External MPRIS volume changes must not be overwritten by later UI settings.
     final persisted = widget.store.read('settings') as Map?;
     if (persisted?['volume'] != null) settings['volume'] = persisted!['volume'];
@@ -104,10 +195,11 @@ class _TaktAppState extends State<TaktApp> {
 
   @override
   void dispose() {
+    sleep.removeListener(changed);
+    if (widget.sleepTimer == null) sleep.dispose();
     library.removeListener(changed);
-    queue.removeListener(changed);
+    queue.removeListener(queueChanged);
     search.dispose();
-    playlistName.dispose();
     super.dispose();
   }
 
@@ -153,7 +245,7 @@ class _TaktAppState extends State<TaktApp> {
               t,
       ];
     }
-    return library
+    final base = library
         .visible(
           query: search.text,
           playlist: playlist,
@@ -163,6 +255,21 @@ class _TaktAppState extends State<TaktApp> {
         )
         .where((t) => !showFavorites || library.favorites.contains(t.id))
         .toList();
+    if (specialView == 'recent') return views.recent(base);
+    if (specialView == 'added') return views.added(base);
+    if ((specialView == 'albums' || specialView == 'artists') &&
+        groupId != null) {
+      final groups = views.groups(
+        library.tracks,
+        albums: specialView == 'albums',
+      );
+      final match = groups.where((g) => g.id == groupId);
+      final ids = match.isEmpty
+          ? <String>{}
+          : match.first.tracks.map((t) => t.id).toSet();
+      return base.where((t) => ids.contains(t.id)).toList();
+    }
+    return base;
   }
 
   // Playback keys are inactive inside text editing, while Super+Q remains global.
@@ -184,13 +291,50 @@ class _TaktAppState extends State<TaktApp> {
     await queue.seek(Duration(milliseconds: target));
   }
 
-  Future<void> _volumeBy(double delta) async {
-    final volume = ((settings['volume'] as num? ?? 70).toDouble() + delta)
-        .clamp(0.0, 100.0);
-    settings['volume'] = volume;
+  Future<void> setVolume(double value) async {
+    if (sleep.fading) await sleep.cancel(restore: false);
+    settings['volume'] = value.clamp(0, 100);
     saveSettings();
-    await queue.engine.volume(volume);
+    await queue.engine.volume((settings['volume'] as num).toDouble());
   }
+
+  Future<void> _sleepDialog(BuildContext ctx) => showTaktDialog<void>(
+    context: ctx,
+    builder: (_) => SleepTimerDialog(timer: sleep, english: en, dark: dark),
+  );
+  Future<void> _toggleCompact() async {
+    if (_compactChanging) return;
+    _compactChanging = true;
+    try {
+      await widget.onCompactChanged?.call(
+        !compact,
+        settings['compactAlwaysOnTop'] == true,
+      );
+      if (mounted) setState(() => compact = !compact);
+    } catch (e) {
+      message(e.toString());
+    } finally {
+      _compactChanging = false;
+    }
+  }
+
+  Future<void> _pinCompact() async {
+    if (_compactChanging) return;
+    _compactChanging = true;
+    final value = settings['compactAlwaysOnTop'] != true;
+    try {
+      await widget.onCompactChanged?.call(true, value);
+      settings['compactAlwaysOnTop'] = value;
+      saveSettings();
+    } catch (e) {
+      message(e.toString());
+    } finally {
+      _compactChanging = false;
+    }
+  }
+
+  Future<void> _volumeBy(double delta) =>
+      setVolume((settings['volume'] as num? ?? 70).toDouble() + delta);
 
   @override
   // Theme and overall layout: sidebar, main content and bottom playback panel.
@@ -270,7 +414,22 @@ class _TaktAppState extends State<TaktApp> {
           const _PlaybackActivator(LogicalKeyboardKey.arrowDown): () =>
               _shortcut(() => _volumeBy(-5)),
         },
-        child: Focus(autofocus: true, child: child!),
+        child: PresentationScope(
+          preferences: PresentationPreferences.fromMap(settings),
+          appearance: customAppearance ? appearanceProfile : null,
+          child: BackdropLayers(
+            profile: appearanceProfile,
+            refreshHz: PresentationPreferences.fromMap(settings).visualizerHz,
+            maxBlur: PresentationPreferences.fromMap(settings).blurSigma,
+            sample: widget.amplitudes,
+            child: MediaQuery(
+              data: MediaQuery.of(context).copyWith(
+                textScaler: TextScaler.linear(appearanceProfile.textScale),
+              ),
+              child: Focus(autofocus: true, child: child!),
+            ),
+          ),
+        ),
       ),
       scaffoldMessengerKey: messenger,
       title: 'Takt',
@@ -281,103 +440,323 @@ class _TaktAppState extends State<TaktApp> {
       theme: theme,
       home: Builder(
         builder: (ctx) => Scaffold(
-          body: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                children: [
-                  Expanded(
-                    child: LayoutBuilder(
-                      builder: (c, area) {
-                        final panel = SettingsPanel(
-                          key: const Key('settings-panel'),
-                          settings: settings,
-                          library: library,
-                          save: saveSettings,
-                          close: () => setState(() => settingsOpen = false),
-                          chooseFolder: chooseFolder,
-                          quit: widget.exit,
-                        );
-                        final wide = area.maxWidth >= 1000;
-                        return Stack(
-                          children: [
-                            Row(
-                              children: [
-                                _sidebar(ctx),
-                                const SizedBox(width: 20),
-                                Expanded(
-                                  child: animatedPage(
-                                    KeyedSubtree(
-                                      key: ValueKey(
-                                        '$viewKey:$showQueue:$folders:$folder',
+          backgroundColor: Colors.transparent,
+          body: compact
+              ? ListenableBuilder(
+                  listenable: queue,
+                  builder: (c, _) => CompactPlayer(
+                    queue: queue,
+                    english: en,
+                    dark: dark,
+                    volume:
+                        sleep.currentVolume ??
+                        (settings['volume'] as num? ?? 70).toDouble(),
+                    onVolume: setVolume,
+                    restore: () => _toggleCompact(),
+                    close: widget.close ?? widget.exit,
+                    pinned: settings['compactAlwaysOnTop'] == true,
+                    onPin: () => _pinCompact(),
+                    art: _art(queue.current, size: 60),
+                  ),
+                )
+              : SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: LayoutBuilder(
+                            builder: (c, area) {
+                              final panel = Padding(
+                                padding: const EdgeInsets.only(top: 40),
+                                child: SettingsPanel(
+                                  key: const Key('settings-panel'),
+                                  settings: settings,
+                                  library: library,
+                                  save: saveSettings,
+                                  close: () =>
+                                      setState(() => settingsOpen = false),
+                                  chooseFolder: chooseFolder,
+                                  quit: widget.exit,
+                                  appearance: () => _editAppearance(ctx),
+                                  editLayout: () => _startLayoutEdit(),
+                                  sleepTimer: () => _sleepDialog(ctx),
+                                  compact: () => _toggleCompact(),
+                                ),
+                              );
+                              final wide = area.maxWidth >= 1000;
+                              return Stack(
+                                children: [
+                                  Row(
+                                    children: [
+                                      ResizableSidebar(
+                                        preferredWidth: layoutEditing
+                                            ? math.max(
+                                                240,
+                                                layoutPreferences.sidebarWidth,
+                                              )
+                                            : layoutPreferences.sidebarWidth,
+                                        availableWidth:
+                                            area.maxWidth -
+                                            (wide && settingsOpen ? 376 : 0),
+                                        collapsed:
+                                            layoutCollapsedDraft ??
+                                            PresentationPreferences.fromMap(
+                                              settings,
+                                            ).sidebarCollapsed,
+                                        onResizeEnd: (v) {
+                                          if (layoutEditing) {
+                                            layoutDraft = {
+                                              ...layoutPreferences.toMap(),
+                                              'sidebarWidth': v,
+                                            };
+                                            setState(() {});
+                                          } else {
+                                            settings['layout'] = {
+                                              ...layoutPreferences.toMap(),
+                                              'sidebarWidth': v,
+                                            };
+                                            saveSettings();
+                                          }
+                                        },
+                                        onCollapsedChanged: (v) {
+                                          if (layoutEditing) {
+                                            setState(
+                                              () => layoutCollapsedDraft = v,
+                                            );
+                                          } else {
+                                            settings['sidebarCollapsed'] = v;
+                                            saveSettings();
+                                          }
+                                        },
+                                        child: Builder(
+                                          builder: (sideCtx) =>
+                                              _sidebar(sideCtx),
+                                        ),
                                       ),
-                                      child: _body(ctx),
+                                      const SizedBox(width: 20),
+                                      Expanded(
+                                        child: animatedPage(
+                                          KeyedSubtree(
+                                            key: ValueKey(
+                                              '$viewKey:$showQueue:$folders:$folder:$groupId',
+                                            ),
+                                            child: LayoutBuilder(
+                                              builder: (c, area) =>
+                                                  SingleChildScrollView(
+                                                    child: SizedBox(
+                                                      height: math.max(
+                                                        area.maxHeight,
+                                                        300 *
+                                                            appearanceProfile
+                                                                .textScale,
+                                                      ),
+                                                      child: _body(ctx),
+                                                    ),
+                                                  ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      if (wide)
+                                        AnimatedSize(
+                                          duration:
+                                              PresentationPreferences.fromMap(
+                                                settings,
+                                              ).transitionDuration,
+                                          curve: Curves.easeOutCubic,
+                                          alignment: Alignment.centerRight,
+                                          child: settingsOpen
+                                              ? Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        left: 16,
+                                                      ),
+                                                  child: SizedBox(
+                                                    width: 360,
+                                                    child: animatedPage(panel),
+                                                  ),
+                                                )
+                                              : const SizedBox.shrink(),
+                                        ),
+                                    ],
+                                  ),
+                                  if (!wide)
+                                    Positioned(
+                                      top: 0,
+                                      bottom: 0,
+                                      right: 0,
+                                      width: math.min(380, area.maxWidth - 76),
+                                      child: IgnorePointer(
+                                        ignoring: !settingsOpen,
+                                        child: animatedPage(
+                                          settingsOpen
+                                              ? panel
+                                              : const SizedBox.shrink(),
+                                        ),
+                                      ),
+                                    ),
+                                  Positioned(
+                                    top: 0,
+                                    right: 0,
+                                    child: WindowCloseButton(
+                                      onClose: () =>
+                                          (widget.close ?? widget.exit)?.call(),
+                                      hoverOnly:
+                                          PresentationPreferences.fromMap(
+                                            settings,
+                                          ).closeOnHover,
+                                      english: en,
                                     ),
                                   ),
-                                ),
-                                if (wide)
-                                  AnimatedSize(
-                                    duration: interfaceDuration,
-                                    curve: Curves.easeOutCubic,
-                                    alignment: Alignment.centerRight,
-                                    child: settingsOpen
-                                        ? Padding(
-                                            padding: const EdgeInsets.only(
-                                              left: 16,
-                                            ),
-                                            child: SizedBox(
-                                              width: 360,
-                                              child: animatedPage(panel),
-                                            ),
-                                          )
-                                        : const SizedBox.shrink(),
-                                  ),
-                              ],
-                            ),
-                            if (!wide)
-                              Positioned(
-                                top: 0,
-                                bottom: 0,
-                                right: 0,
-                                width: math.min(380, area.maxWidth - 76),
-                                child: IgnorePointer(
-                                  ignoring: !settingsOpen,
-                                  child: animatedPage(
-                                    settingsOpen
-                                        ? panel
-                                        : const SizedBox.shrink(),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        );
-                      },
+                                ],
+                              );
+                            },
+                          ),
+                        ),
+                        if (layoutEditing) _layoutToolbar(ctx),
+                        const SizedBox(height: 12),
+                        ListenableBuilder(
+                          listenable: queue,
+                          builder: (_, _) => _player(ctx),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  _player(ctx),
-                ],
-              ),
-            ),
-          ),
+                ),
         ),
       ),
     );
   }
 
+  Future<String?> _chooseImage() => const MethodChannel('takt/artwork_picker')
+      .invokeMethod<String>('pick', {
+        'title': tr('Выбрать картинку', 'Choose image'),
+        'cancel': tr('Отмена', 'Cancel'),
+        'open': tr('Выбрать', 'Choose'),
+        'theme': dark ? 'dark' : 'light',
+        'error': tr(
+          'Не удалось открыть изображение',
+          'Cannot preview this image',
+        ),
+      });
+  Future<void> _applyOpacity(double value) async {
+    if (_opacityUnsupported || _lastOpacity == value) return;
+    _lastOpacity = value;
+    try {
+      await windowManager.setOpacity(value);
+    } catch (_) {
+      _opacityUnsupported = true;
+      if (mounted) {
+        message(
+          tr(
+            'Оконный менеджер не поддерживает прозрачность окна',
+            'Window manager does not support window opacity',
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _editAppearance(BuildContext ctx) async {
+    if (appearanceDialogOpen) return;
+    appearanceDialogOpen = true;
+    try {
+      await showTaktDialog<void>(
+        context: ctx,
+        builder: (_) => AppearanceEditor(
+          settings: settings,
+          chooseWallpaper: _chooseImage,
+          onPreview: (value) {
+            if (!mounted) return;
+            setState(() => appearancePreview = value);
+            _notifyVisualDemand();
+            _applyOpacity(appearanceProfile.windowOpacity);
+          },
+          onCancel: () {
+            if (mounted) setState(() => appearancePreview = null);
+          },
+          onSave: (value) async {
+            try {
+              for (final key in ['appearanceLight', 'appearanceDark']) {
+                final profile = value[key];
+                if (profile is! Map) continue;
+                final path = profile['wallpaper'];
+                if (path is! String) continue;
+                final file = File(path);
+                if (!await file.exists()) {
+                  final previous = settings[key];
+                  if (previous is Map && previous['wallpaper'] == path) {
+                    profile.remove('wallpaper');
+                    continue;
+                  }
+                  throw FileSystemException('Wallpaper is unavailable', path);
+                }
+                final directory = await getApplicationSupportDirectory();
+                final target = Directory('${directory.path}/wallpapers');
+                await target.create(recursive: true);
+                final hash = (await sha256.bind(file.openRead()).first)
+                    .toString();
+                final name = file.uri.pathSegments.last;
+                final suffix = name.contains('.') ? name.split('.').last : '';
+                final extension =
+                    RegExp(r'^[a-zA-Z0-9]{1,10}$').hasMatch(suffix)
+                    ? '.$suffix'
+                    : '';
+                final destination = '${target.path}/$hash$extension';
+                if (file.path != destination) await file.copy(destination);
+                profile['wallpaper'] = destination;
+              }
+              for (final key in [
+                'appearanceLight',
+                'appearanceDark',
+                'appearancePresets',
+                'dark',
+                'layout',
+              ]) {
+                if (value.containsKey(key)) settings[key] = value[key];
+              }
+              appearancePreview = null;
+              saveSettings();
+              _notifyVisualDemand();
+              await _applyOpacity(appearanceProfile.windowOpacity);
+              return true;
+            } catch (error) {
+              if (mounted) message(error.toString());
+              return false;
+            }
+          },
+        ),
+      );
+    } finally {
+      appearanceDialogOpen = false;
+      if (mounted) {
+        setState(() => appearancePreview = null);
+        _notifyVisualDemand();
+        _applyOpacity(appearanceProfile.windowOpacity);
+      }
+    }
+  }
+
   // Shared glass material: blur, transparency and corners. Adjust the effect here.
   Widget _glass(
     Widget child, {
+    String identity = 'sidebar',
     BorderRadius radius = const BorderRadius.all(Radius.circular(22)),
   }) => GlassSurface(
+    identity: identity,
     dark: dark,
     enabled: settings['glass'] != false,
     radius: radius.topLeft.x,
     child: child,
   );
+  bool _sidebarCompact(BuildContext ctx) =>
+      SidebarScope.of(ctx) ??
+      (layoutCollapsedDraft ??
+          PresentationPreferences.fromMap(settings).sidebarCollapsed);
   // Left function panel; its bottom section places settings above playback controls.
   Widget _sidebar(BuildContext ctx) => SizedBox(
-    width: MediaQuery.sizeOf(ctx).width < 650 ? 62 : 178,
+    width: double.infinity,
     child: _glass(
       Padding(
         padding: const EdgeInsets.all(8),
@@ -394,7 +773,7 @@ class _TaktAppState extends State<TaktApp> {
                         vertical: 16,
                         horizontal: 8,
                       ),
-                      child: MediaQuery.sizeOf(ctx).width < 650
+                      child: _sidebarCompact(ctx)
                           ? const Center(
                               child: Text('T', style: TextStyle(fontSize: 24)),
                             )
@@ -407,59 +786,11 @@ class _TaktAppState extends State<TaktApp> {
                               ),
                             ),
                     ),
-                    _nav(
-                      ctx,
-                      Icons.music_note,
-                      tr('Моя музыка', 'My music'),
-                      () {
-                        setState(() {
-                          folders = false;
-                          folder = null;
-                          playlist = null;
-                          showQueue = false;
-                          showFavorites = false;
-                          selected.clear();
-                        });
-                      },
-                    ),
-                    _nav(
-                      ctx,
-                      Icons.star_outline,
-                      tr('Избранное', 'Favorites'),
-                      () {
-                        setState(() {
-                          showFavorites = true;
-                          showQueue = false;
-                          folders = false;
-                          playlist = null;
-                          folder = null;
-                          selected.clear();
-                        });
-                      },
-                    ),
-                    _nav(
-                      ctx,
-                      Icons.folder_outlined,
-                      tr('Папки', 'Folders'),
-                      () {
-                        setState(() {
-                          folders = true;
-                          playlist = null;
-                          folder = null;
-                          showQueue = false;
-                          showFavorites = false;
-                          selected.clear();
-                        });
-                      },
-                    ),
-                    _nav(
-                      ctx,
-                      Icons.playlist_add,
-                      tr('Новый плейлист', 'New playlist'),
-                      () {
-                        setState(() => creating = !creating);
-                      },
-                    ),
+                    if (layoutEditing)
+                      _editableSidebar(ctx)
+                    else
+                      for (final id in layoutPreferences.visibleSidebar)
+                        _sidebarAction(ctx, id),
                   ],
                 ),
               ),
@@ -475,6 +806,170 @@ class _TaktAppState extends State<TaktApp> {
       ),
     ),
   );
+  String _navLabel(String id) =>
+      {
+        'all': tr('Моя музыка', 'My music'),
+        'favorites': tr('Избранное', 'Favorites'),
+        'folders': tr('Папки', 'Folders'),
+        'recent': tr('Недавно прослушанное', 'Recently played'),
+        'added': tr('Недавно добавленное', 'Recently added'),
+        'albums': tr('Альбомы', 'Albums'),
+        'artists': tr('Исполнители', 'Artists'),
+        'new': tr('Новый плейлист', 'New playlist'),
+      }[id] ??
+      id;
+  IconData _navIcon(String id) =>
+      {
+        'all': Icons.music_note,
+        'favorites': Icons.star_outline,
+        'folders': Icons.folder_outlined,
+        'recent': Icons.history,
+        'added': Icons.fiber_new_outlined,
+        'albums': Icons.album_outlined,
+        'artists': Icons.person_outline,
+        'new': Icons.playlist_add,
+      }[id] ??
+      Icons.music_note;
+  Widget _sidebarAction(BuildContext ctx, String id) =>
+      _nav(ctx, _navIcon(id), _navLabel(id), () {
+        if (id == 'new') {
+          _createPlaylist(ctx);
+          return;
+        }
+        setState(() {
+          playlist = null;
+          folder = null;
+          showQueue = false;
+          showFavorites = id == 'favorites';
+          folders = id == 'folders';
+          groupId = null;
+          specialView = ['recent', 'added', 'albums', 'artists'].contains(id)
+              ? id
+              : null;
+          selected.clear();
+          search.clear();
+        });
+      });
+  void _startLayoutEdit() {
+    setState(() {
+      layoutCollapsedDraft = settings['sidebarCollapsed'] == true;
+      layoutDraft = layoutPreferences.toMap();
+      layoutEditing = true;
+      settingsOpen = false;
+    });
+  }
+
+  void _finishLayoutEdit(bool save) {
+    if (save) {
+      settings['sidebarCollapsed'] = layoutCollapsedDraft ?? false;
+      settings['layout'] = layoutPreferences.toMap();
+      settings['sidebarWidth'] = layoutPreferences.sidebarWidth;
+    }
+    setState(() {
+      layoutCollapsedDraft = null;
+      layoutDraft = null;
+      layoutEditing = false;
+    });
+    if (save) saveSettings();
+  }
+
+  Widget _layoutToolbar(BuildContext ctx) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: Wrap(
+      spacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Text(tr('Редактирование интерфейса', 'Editing interface')),
+        TextButton(
+          onPressed: () => setState(
+            () => layoutDraft = LayoutPreferences.fromMap({}).toMap(),
+          ),
+          child: Text(tr('Сброс', 'Reset')),
+        ),
+        TextButton(
+          onPressed: () async {
+            final value = await showTaktDialog<LayoutPreferences>(
+              context: ctx,
+              builder: (_) => LayoutEditor(
+                initial: layoutPreferences,
+                english: en,
+                dark: dark,
+                onPreview: (_) {},
+              ),
+            );
+            if (mounted && value != null) {
+              setState(() => layoutDraft = value.toMap());
+            }
+          },
+          child: Text(tr('Параметры', 'Options')),
+        ),
+        TextButton(
+          onPressed: () => _finishLayoutEdit(false),
+          child: Text(tr('Отмена', 'Cancel')),
+        ),
+        FilledButton(
+          onPressed: () => _finishLayoutEdit(true),
+          child: Text(tr('Готово', 'Done')),
+        ),
+      ],
+    ),
+  );
+  Widget _editableSidebar(BuildContext ctx) {
+    final order = layoutPreferences.sidebarOrder;
+    return ReorderableListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      buildDefaultDragHandles: false,
+      itemCount: order.length,
+      onReorderItem: (from, to) {
+        final next = List<String>.of(order);
+        final id = next.removeAt(from);
+        next.insert(to, id);
+        setState(
+          () => layoutDraft = {
+            ...layoutPreferences.toMap(),
+            'sidebarOrder': next,
+          },
+        );
+      },
+      itemBuilder: (_, i) {
+        final id = order[i];
+        return Flex(
+          direction: _sidebarCompact(ctx) ? Axis.vertical : Axis.horizontal,
+          key: ValueKey('nav-edit-$id'),
+          children: [
+            ReorderableDragStartListener(
+              index: i,
+              child: const Icon(Icons.drag_handle, size: 16),
+            ),
+            if (_sidebarCompact(ctx))
+              _sidebarAction(ctx, id)
+            else
+              Expanded(child: _sidebarAction(ctx, id)),
+            IconButton(
+              icon: Icon(
+                layoutPreferences.hiddenSidebar.contains(id)
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                size: 16,
+              ),
+              onPressed: () {
+                final hidden = List<String>.of(layoutPreferences.hiddenSidebar);
+                hidden.contains(id) ? hidden.remove(id) : hidden.add(id);
+                setState(
+                  () => layoutDraft = {
+                    ...layoutPreferences.toMap(),
+                    'hiddenSidebar': hidden,
+                  },
+                );
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   // One navigation button: icon, label and active-state appearance.
   Widget _nav(
     BuildContext ctx,
@@ -491,17 +986,101 @@ class _TaktAppState extends State<TaktApp> {
     child: Row(
       children: [
         Icon(icon, size: 20),
-        if (MediaQuery.sizeOf(ctx).width >= 650) ...[
+        if (!_sidebarCompact(ctx)) ...[
           const SizedBox(width: 10),
-          Expanded(child: Text(title)),
+          Expanded(
+            child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis),
+          ),
         ],
       ],
     ),
   );
+  String _groupHeading() {
+    if (groupId != null) {
+      final matching = views
+          .groups(library.tracks, albums: specialView == 'albums')
+          .where((g) => g.id == groupId);
+      if (matching.isNotEmpty) return _groupName(matching.first);
+    }
+    return _navLabel(specialView!);
+  }
+
+  String _groupName(LibraryGroup group) => group.name.isNotEmpty
+      ? group.name
+      : (specialView == 'albums'
+            ? tr('Неизвестный альбом', 'Unknown album')
+            : tr('Неизвестный исполнитель', 'Unknown artist'));
+  Widget _groupCards(BuildContext ctx) {
+    final groups = views
+        .groups(library.tracks, albums: specialView == 'albums')
+        .where(
+          (g) => '${_groupName(g)} ${g.artist}'.toLowerCase().contains(
+            search.text.toLowerCase(),
+          ),
+        )
+        .toList();
+    return GridView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 230,
+        mainAxisExtent: 190,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+      ),
+      itemCount: groups.length,
+      itemBuilder: (_, i) {
+        final group = groups[i];
+        final covers = group.tracks.where((t) => t.artwork != null);
+        return Material(
+          color: Theme.of(ctx).colorScheme.surface,
+          borderRadius: BorderRadius.circular(22),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(22),
+            onTap: () => setState(() {
+              groupId = group.id;
+              search.clear();
+            }),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _art(
+                    covers.isEmpty ? group.tracks.first : covers.first,
+                    size: 76,
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    _groupName(group),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (group.artist.isNotEmpty)
+                    Text(
+                      group.artist,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  Text(
+                    '${group.tracks.length} ${tr('треков', 'tracks')}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   // Main area: heading/theme, tabs, search or creation form, list and drag animation.
   Widget _body(BuildContext ctx) {
     final rows = shown;
-    final heading = showQueue
+    final heading = specialView != null
+        ? _groupHeading()
+        : showQueue
         ? tr('Текущая очередь', 'Current queue')
         : showFavorites
         ? tr('Избранное', 'Favorites')
@@ -537,6 +1116,7 @@ class _TaktAppState extends State<TaktApp> {
                   onTap: () {
                     settings['dark'] = !dark;
                     saveSettings();
+                    _applyOpacity(appearanceProfile.windowOpacity);
                   },
                   borderRadius: BorderRadius.circular(30),
                   child: Container(
@@ -549,7 +1129,8 @@ class _TaktAppState extends State<TaktApp> {
                       borderRadius: BorderRadius.circular(30),
                     ),
                     child: AnimatedAlign(
-                      duration: const Duration(milliseconds: 180),
+                      duration: PresentationPreferences.fromMap(settings)
+                          .transitionDuration,
                       alignment: dark
                           ? Alignment.centerRight
                           : Alignment.centerLeft,
@@ -605,6 +1186,8 @@ class _TaktAppState extends State<TaktApp> {
                   playlist == null,
                   () => setState(() {
                     playlist = null;
+                    specialView = null;
+                    groupId = null;
                     selected.clear();
                   }),
                 ),
@@ -617,6 +1200,8 @@ class _TaktAppState extends State<TaktApp> {
                       p.name,
                       playlist == p.id,
                       () => setState(() {
+                        specialView = null;
+                        groupId = null;
                         playlist = p.id;
                         selected.clear();
                       }),
@@ -625,60 +1210,32 @@ class _TaktAppState extends State<TaktApp> {
                 IconButton(
                   key: const Key('new-playlist'),
                   tooltip: tr('Создать плейлист', 'Create playlist'),
-                  onPressed: () => setState(() => creating = !creating),
+                  onPressed: () => _createPlaylist(ctx),
                   icon: const Icon(Icons.add),
                 ),
               ],
             ),
           const SizedBox(height: 12),
           AnimatedSize(
-            duration: interfaceDuration,
+            duration: PresentationPreferences.fromMap(settings)
+                .transitionDuration,
             curve: Curves.easeOutCubic,
             child: animatedPage(
-              creating
-                  ? Row(
-                      key: const ValueKey("playlist-form"),
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            key: const Key('playlist-create'),
-                            controller: playlistName,
-                            autofocus: true,
-                            decoration: InputDecoration(
-                              hintText: tr(
-                                'Название плейлиста',
-                                'Playlist name',
-                              ),
-                              border: const OutlineInputBorder(),
-                            ),
-                            onSubmitted: (_) => _createPlaylist(),
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: _createPlaylist,
-                          child: Text(tr('Создать', 'Create')),
-                        ),
-                        IconButton(
-                          onPressed: () => setState(() => creating = false),
-                          icon: const Icon(Icons.close),
-                        ),
-                      ],
-                    )
-                  : TextField(
-                      key: const Key('track-search'),
-                      controller: search,
-                      onChanged: (_) => changed(),
-                      decoration: InputDecoration(
-                        hintText: tr('Поиск треков', 'Search tracks'),
-                        prefixIcon: const Icon(Icons.search, size: 20),
-                        filled: true,
-                        fillColor: Theme.of(ctx).colorScheme.surface,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                    ),
+              TextField(
+                key: const Key('track-search'),
+                controller: search,
+                onChanged: (_) => changed(),
+                decoration: InputDecoration(
+                  hintText: tr('Поиск треков', 'Search tracks'),
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  filled: true,
+                  fillColor: Theme.of(ctx).colorScheme.surface,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
             ),
           ),
           if (folders && folder != null)
@@ -721,6 +1278,15 @@ class _TaktAppState extends State<TaktApp> {
                   icon: const Icon(Icons.close),
                 ),
               ],
+              if (groupId != null)
+                IconButton(
+                  tooltip: tr('Назад', 'Back'),
+                  onPressed: () => setState(() {
+                    groupId = null;
+                    search.clear();
+                  }),
+                  icon: const Icon(Icons.arrow_back),
+                ),
               if (folder != null)
                 IconButton(
                   onPressed: () => setState(
@@ -737,8 +1303,10 @@ class _TaktAppState extends State<TaktApp> {
                 color: dark ? const Color(0xff252627) : const Color(0xfff4f4f4),
                 surfaceTintColor: Colors.transparent,
                 popUpAnimationStyle: AnimationStyle(
-                  duration: interfaceDuration,
-                  reverseDuration: interfaceDuration,
+                  duration: PresentationPreferences.fromMap(settings)
+                      .transitionDuration,
+                  reverseDuration: PresentationPreferences.fromMap(settings)
+                      .transitionDuration,
                   curve: Curves.easeOutCubic,
                 ),
                 icon: const Icon(Icons.sort),
@@ -764,7 +1332,11 @@ class _TaktAppState extends State<TaktApp> {
             ],
           ),
           Expanded(
-            child: rows.isEmpty
+            child:
+                (specialView == 'albums' || specialView == 'artists') &&
+                    groupId == null
+                ? _groupCards(ctx)
+                : rows.isEmpty
                 ? Center(
                     child: SingleChildScrollView(
                       child: Column(
@@ -862,18 +1434,31 @@ class _TaktAppState extends State<TaktApp> {
     ),
     child: Text(text),
   );
-  // Create from the temporary input, then hide and clear that input.
-  void _createPlaylist() {
-    if (playlistName.text.trim().isEmpty) return;
-    playlist = library.createPlaylist(playlistName.text);
-    showFavorites = false;
-    showQueue = false;
-    folders = false;
-    folder = null;
-    selected.clear();
-    search.clear();
-    playlistName.clear();
-    setState(() => creating = false);
+  Future<void> _createPlaylist(BuildContext ctx) async {
+    if (playlistDialogOpen) return;
+    playlistDialogOpen = true;
+    try {
+      final name = await showPlaylistDialog(
+        context: ctx,
+        dark: dark,
+        glass: settings['glass'] != false,
+        english: en,
+      );
+      if (!mounted || name == null) return;
+      specialView = null;
+      groupId = null;
+      playlist = library.createPlaylist(name);
+      setState(() {
+        showFavorites = false;
+        showQueue = false;
+        folders = false;
+        folder = null;
+        selected.clear();
+        search.clear();
+      });
+    } finally {
+      playlistDialogOpen = false;
+    }
   }
 
   // Local artwork or placeholder, shared by track rows and the playback panel.
@@ -945,7 +1530,20 @@ class _TaktAppState extends State<TaktApp> {
             },
             onLongPress: () => setState(() => selected.add(t.id)),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 10, 0, 10),
+              padding: EdgeInsets.fromLTRB(
+                20,
+                {
+                  'compact': 6.0,
+                  'normal': 10.0,
+                  'comfortable': 16.0,
+                }[appearanceProfile.density]!,
+                0,
+                {
+                  'compact': 6.0,
+                  'normal': 10.0,
+                  'comfortable': 16.0,
+                }[appearanceProfile.density]!,
+              ),
               child: Row(
                 children: [
                   _art(t),
@@ -1006,7 +1604,7 @@ class _TaktAppState extends State<TaktApp> {
                       glass: settings['glass'] != false,
                       estimatedHeight: 520,
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        padding: EdgeInsets.symmetric(vertical: 8),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: _actions(t),
@@ -1233,7 +1831,12 @@ class _TaktAppState extends State<TaktApp> {
               .invokeMethod<String>('pick', {
                 'title': tr('Выбрать обложку', 'Choose artwork'),
                 'cancel': tr('Отмена', 'Cancel'),
-                'open': tr('Открыть', 'Open'),
+                'open': tr('Выбрать', 'Choose'),
+                'theme': dark ? 'dark' : 'light',
+                'error': tr(
+                  'Не удалось открыть изображение',
+                  'Cannot preview this image',
+                ),
               });
           if (path != null) await library.setArtwork(t.id, path);
           break;
@@ -1352,6 +1955,89 @@ class _TaktAppState extends State<TaktApp> {
   Widget _player(BuildContext ctx) {
     final ink = Theme.of(ctx).colorScheme.onSurface;
     final current = queue.current;
+    final controls = <String, Widget>{
+      'timer': IconButton(
+        tooltip: sleep.active
+            ? '${tr('Таймер', 'Timer')}: ${_time(sleep.remaining)}'
+            : tr('Таймер сна', 'Sleep timer'),
+        onPressed: () => _sleepDialog(ctx),
+        icon: Icon(sleep.active ? Icons.timer : Icons.timer_outlined),
+      ),
+      'visualizer': IconButton(
+        tooltip: tr('Визуализатор', 'Visualizer'),
+        onPressed: () {
+          settings['visualizerEnabled'] =
+              settings['visualizerEnabled'] == false;
+          saveSettings();
+        },
+        icon: const Icon(Icons.graphic_eq),
+      ),
+      'compact': IconButton(
+        tooltip: tr('Компактный режим', 'Compact mode'),
+        onPressed: () => _toggleCompact(),
+        icon: const Icon(Icons.picture_in_picture_alt),
+      ),
+      'mode': IconButton(
+        tooltip: [
+          tr('По кругу', 'Loop'),
+          tr('Один проход', 'Once'),
+          tr('Перемешивание', 'Shuffle'),
+          tr('Повтор трека', 'Repeat track'),
+        ][queue.mode.index],
+        onPressed: () {
+          queue.mode = QueueMode.values[(queue.mode.index + 1) % 4];
+          queue.save();
+          changed();
+        },
+        icon: Icon(
+          [
+            Icons.repeat,
+            Icons.playlist_play,
+            Icons.shuffle,
+            Icons.repeat_one,
+          ][queue.mode.index],
+          size: 20,
+        ),
+      ),
+      'previous': IconButton(
+        onPressed: () => queue.previous(),
+        icon: const Icon(Icons.skip_previous),
+      ),
+      'play': IconButton.filled(
+        style: IconButton.styleFrom(
+          backgroundColor: ink,
+          foregroundColor: Theme.of(ctx).colorScheme.surface,
+        ),
+        onPressed: () => queue.toggle(),
+        icon: Icon(queue.playing ? Icons.pause : Icons.play_arrow),
+      ),
+      'next': IconButton(
+        onPressed: () => queue.next(),
+        icon: const Icon(Icons.skip_next),
+      ),
+      'volume': VolumeControl(
+        value:
+            sleep.currentVolume ??
+            (settings['volume'] as num? ?? 70).toDouble(),
+        onChanged: setVolume,
+        inline: PresentationPreferences.fromMap(settings).volumeInline,
+        wheelEnabled: PresentationPreferences.fromMap(settings).volumeWheel,
+        dark: dark,
+        glass: settings['glass'] != false,
+        english: en,
+      ),
+      'favorite': IconButton(
+        tooltip: tr('Избранное', 'Favorite'),
+        onPressed: current == null
+            ? null
+            : () => library.toggleFavorite([current.id]),
+        icon: Icon(
+          current != null && library.favorites.contains(current.id)
+              ? Icons.star
+              : Icons.star_outline,
+        ),
+      ),
+    };
     final center = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1369,55 +2055,20 @@ class _TaktAppState extends State<TaktApp> {
         const SizedBox(height: 6),
         Stack(
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  tooltip: [
-                    tr('По кругу', 'Loop'),
-                    tr('Один проход', 'Once'),
-                    tr('Перемешивание', 'Shuffle'),
-                    tr('Повтор трека', 'Repeat track'),
-                  ][queue.mode.index],
-                  onPressed: () {
-                    queue.mode = QueueMode.values[(queue.mode.index + 1) % 4];
-                    queue.save();
-                    changed();
-                  },
-                  icon: Icon(
-                    [
-                      Icons.repeat,
-                      Icons.playlist_play,
-                      Icons.shuffle,
-                      Icons.repeat_one,
-                    ][queue.mode.index],
-                    size: 20,
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => queue.previous(),
-                  icon: const Icon(Icons.skip_previous),
-                ),
-                IconButton.filled(
-                  style: IconButton.styleFrom(
-                    backgroundColor: ink,
-                    foregroundColor: Theme.of(ctx).colorScheme.surface,
-                  ),
-                  onPressed: () => queue.toggle(),
-                  icon: Icon(queue.playing ? Icons.pause : Icons.play_arrow),
-                ),
-                IconButton(
-                  onPressed: () => queue.next(),
-                  icon: const Icon(Icons.skip_next),
-                ),
-                Builder(
-                  builder: (buttonCtx) => IconButton(
-                    tooltip: tr('Громкость', 'Volume'),
-                    onPressed: () => _volume(buttonCtx),
-                    icon: const Icon(Icons.volume_up_outlined, size: 20),
-                  ),
-                ),
-              ],
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 36),
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  for (final id
+                      in layoutEditing
+                          ? layoutPreferences.controlsOrder
+                          : layoutPreferences.visibleControls)
+                    if (controls.containsKey(id))
+                      _layoutControl(id, controls[id]!),
+                ],
+              ),
             ),
             Positioned(
               left: 0,
@@ -1447,52 +2098,126 @@ class _TaktAppState extends State<TaktApp> {
         ),
       ],
     );
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(ctx).colorScheme.surface,
-        borderRadius: BorderRadius.circular(32),
-      ),
-      child: LayoutBuilder(
-        builder: (ctx, size) {
-          if (size.maxWidth < 600) {
-            return Column(
-              mainAxisSize: MainAxisSize.min,
+    return GlassSurface(
+      identity: 'player',
+      dark: dark,
+      enabled: settings['glass'] != false,
+      radius: 32,
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 16 + (layoutPreferences.playerHeight - 180) / 2,
+        ),
+        child: LayoutBuilder(
+          builder: (ctx, size) {
+            if (size.maxWidth < 600) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (settings['visualizerEnabled'] != false)
+                    SizedBox(height: 24, width: 110, child: _signal(ink)),
+                  center,
+                ],
+              );
+            }
+            return Row(
               children: [
-                if (settings['visualizerEnabled'] != false)
-                  SizedBox(height: 24, width: 110, child: _signal(ink)),
-                center,
-              ],
-            );
-          }
-          return Row(
-            children: [
-              SizedBox(
-                width: 120,
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: GestureDetector(
-                    onTap: () => _queueMenu(ctx),
-                    child: _glass(
-                      _art(current, size: 96),
-                      radius: BorderRadius.circular(12),
+                SizedBox(
+                  width: 120,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: GestureDetector(
+                      onTap: () => _queueMenu(ctx),
+                      child: _glass(
+                        _art(current, size: 96),
+                        identity: 'player',
+                        radius: BorderRadius.circular(12),
+                      ),
                     ),
                   ),
                 ),
+                const SizedBox(width: 28),
+                Expanded(child: center),
+                const SizedBox(width: 28),
+                SizedBox(
+                  width: 120,
+                  height: 60,
+                  child: settings['visualizerEnabled'] != false
+                      ? _signal(ink)
+                      : null,
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _layoutControl(String id, Widget child) {
+    if (!layoutEditing) return child;
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (d) =>
+          LayoutPreferences.controlIds.contains(d.data),
+      onAcceptWithDetails: (d) {
+        if (d.data == id) return;
+        final order = List<String>.of(layoutPreferences.controlsOrder);
+        order.remove(d.data);
+        order.insert(order.indexOf(id), d.data);
+        setState(
+          () => layoutDraft = {
+            ...layoutPreferences.toMap(),
+            'controlsOrder': order,
+          },
+        );
+      },
+      builder: (c, _, _) => LongPressDraggable<String>(
+        data: id,
+        feedback: Material(
+          color: Theme.of(c).colorScheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          child: SizedBox(
+            width: 48,
+            height: 48,
+            child: IgnorePointer(child: child),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IgnorePointer(
+              child: Opacity(
+                opacity: layoutPreferences.hiddenControls.contains(id)
+                    ? .3
+                    : 1.0,
+                child: child,
               ),
-              const SizedBox(width: 28),
-              Expanded(child: center),
-              const SizedBox(width: 28),
-              SizedBox(
-                width: 120,
-                height: 60,
-                child: settings['visualizerEnabled'] != false
-                    ? _signal(ink)
-                    : null,
+            ),
+            if (id == 'play')
+              const SizedBox(height: 40)
+            else
+              IconButton(
+                icon: Icon(
+                  layoutPreferences.hiddenControls.contains(id)
+                      ? Icons.visibility_off
+                      : Icons.visibility,
+                  size: 14,
+                ),
+                onPressed: () {
+                  final hidden = List<String>.of(
+                    layoutPreferences.hiddenControls,
+                  );
+                  hidden.contains(id) ? hidden.remove(id) : hidden.add(id);
+                  setState(
+                    () => layoutDraft = {
+                      ...layoutPreferences.toMap(),
+                      'hiddenControls': hidden,
+                    },
+                  );
+                },
               ),
-            ],
-          );
-        },
+          ],
+        ),
       ),
     );
   }
@@ -1505,6 +2230,8 @@ class _TaktAppState extends State<TaktApp> {
         : Color(settings['visualizerColor']),
     bars: settings['visualizerStyle'] == 'bars',
     smoothness: (settings['visualizerSmoothness'] as num? ?? .5).toDouble(),
+    refreshHz: PresentationPreferences.fromMap(settings).visualizerHz,
+    sample: widget.amplitudes,
   );
 
   Widget _seek(BuildContext ctx) => LayoutBuilder(
@@ -1551,47 +2278,6 @@ class _TaktAppState extends State<TaktApp> {
       );
     },
   );
-  // Volume popup updates the engine and persists the chosen setting.
-  Future<void> _volume(BuildContext ctx) async {
-    await showGlassMenu<void>(
-      context: ctx,
-      anchor: ctx,
-      dark: dark,
-      glass: settings['glass'] != false,
-      width: 250,
-      estimatedHeight: 88,
-      above: true,
-      child: StatefulBuilder(
-        builder: (c, update) => Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              const Icon(Icons.volume_up_outlined, size: 20),
-              Expanded(
-                child: Slider(
-                  key: const Key('volume-slider'),
-                  value: (settings['volume'] as num? ?? 70).toDouble(),
-                  min: 0,
-                  max: 100,
-                  onChanged: (v) {
-                    settings['volume'] = v;
-                    queue.engine.volume(v);
-                    saveSettings();
-                    update(() {});
-                  },
-                ),
-              ),
-              Text(
-                '${(settings['volume'] as num? ?? 70).round()}%',
-                style: const TextStyle(fontSize: 12),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   // Switch the main area to the current queue and reset conflicting filters.
   Future<void> _queueMenu(BuildContext ctx) async {
     await showTaktDialog<void>(

@@ -34,7 +34,7 @@ void main() {
       await tester.tap(find.text('B'));
       await tester.pumpAndSettle();
       expect(queue.currentId, isNull);
-      await tester.tap(find.byIcon(Icons.close));
+      await tester.tap(find.byIcon(Icons.close).first);
       await tester.pumpAndSettle();
       final gesture = await tester.startGesture(
         tester.getCenter(find.byIcon(Icons.menu).first),
@@ -104,6 +104,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('playlist-create')), findsOneWidget);
     await tester.enterText(find.byKey(const Key('playlist-create')), 'Вечер');
+    await tester.pump();
     await tester.tap(find.text('Создать'));
     await tester.pumpAndSettle();
     expect(library.playlists.single.name, 'Вечер');

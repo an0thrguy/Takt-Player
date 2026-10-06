@@ -78,3 +78,16 @@ Use `integration_test/audio_output_test.dart` for the real system audio stream a
 ## Linux shell integration
 
 `lib/platform/mpris.dart` exposes the standard session-bus MPRIS interfaces. Serpantinum gates its CAVA process on MPRIS playback state, so this integration enables shell visualizers as well as media controls. Commands always go through `TaktQueue`; metadata includes personal display titles and artwork file URIs. Position is queried, not emitted as a PropertiesChanged update. `integration_test/mpris_test.dart` checks real playback, D-Bus controls and the installed Serpantinum MprisController/Cava components with isolated fixtures.
+
+## Customization update
+
+- `lib/ui/presentation_preferences.dart`: performance/motion/volume/sidebar defaults.
+- `lib/ui/appearance.dart`, `appearance_editor.dart`: validated theme profiles, drafts and JSON presets.
+- `lib/ui/backdrop_layers.dart`, `glass.dart`, `presentation_scope.dart`: layered wallpaper, bars and per-panel materials.
+- `lib/ui/layout_preferences.dart`, `layout_editor.dart`, `app.dart`: zone order, visibility and in-place editing.
+- `lib/library/library_views.dart`: bounded recent history, additions, album/artist grouping. `Track.addedAt` is backward compatible.
+- `lib/playback/sleep_timer.dart`, `lib/ui/sleep_timer_dialog.dart`: temporary fade, cancellation and expiry.
+- `lib/platform/compact_window.dart`, `lib/ui/compact_player.dart`: geometry boundary and shared-queue compact UI.
+- `linux/runner/artwork_preview.h`, `artwork_picker.h`: bounded native preview and parent-owned picker. `tool/test-artwork-native.sh` runs GTK regression checks.
+
+English comments mark platform boundaries and invariants; preserve draft cancellation and shared engine ownership when customizing.

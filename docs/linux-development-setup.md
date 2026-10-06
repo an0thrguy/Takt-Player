@@ -1,6 +1,6 @@
 # Окружение разработки Takt на Arch Linux
 
-Первая версия — Linux, Hyprland/Wayland. Проверено 3 октября 2026 года. Android и Windows отложены; их SDK сейчас не нужны.
+Первая версия - Linux, Hyprland/Wayland. Проверено 3 октября 2026 года. Android и Windows отложены; их SDK сейчас не нужны.
 
 ## Пакеты и фактическое наличие
 

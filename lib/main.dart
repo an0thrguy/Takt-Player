@@ -11,8 +11,11 @@ import 'library/library.dart';
 import 'library/discover_music.dart';
 import 'playback/engine.dart';
 import 'playback/queue.dart';
+import 'playback/sleep_timer.dart';
+import 'platform/compact_window.dart';
 import 'analysis/audio_analysis.dart';
 import 'ui/app.dart';
+import 'ui/appearance.dart';
 import 'platform/desktop.dart';
 import 'platform/mpris.dart';
 import 'platform/audio_routes.dart';
@@ -47,13 +50,12 @@ Future<void> main() async {
   });
   // Analyze only while music plays and the window is visible.
   bool visible = true;
+  bool visualDemand = visualizationDemand(
+    Map<String, dynamic>.from(settings ?? {}),
+  );
   engine.player.stream.playing.listen((value) {
     queue.updatePlaying(value);
-    analysis.setActive(
-      value &&
-          visible &&
-          (store.read('settings') as Map?)?['visualizerEnabled'] != false,
-    );
+    analysis.setActive(value && visible && visualDemand);
   });
   engine.player.stream.completed.listen((value) {
     if (value && engine.player.state.completed) {
@@ -83,11 +85,15 @@ Future<void> main() async {
   TaktMpris? mpris;
   HeadphoneMonitor? headphones;
   bool quitting = false;
+  SleepTimer? sleepTimer;
+  final compactWindow = CompactWindowController(DesktopCompactWindow());
   // Shared full exit for settings, tray, Super+Q and SIGTERM; repeated calls are ignored.
   Future<void> quit() async {
     if (quitting) return;
     quitting = true;
     saver.cancel();
+    await sleepTimer?.cancel();
+    sleepTimer?.dispose();
     queue.save();
     headphones?.dispose();
     await mpris?.dispose();
@@ -110,11 +116,7 @@ Future<void> main() async {
     previous: queue.previous,
     onVisibility: (value) {
       visible = value;
-      analysis.setActive(
-        value &&
-            queue.playing &&
-            (store.read('settings') as Map?)?['visualizerEnabled'] != false,
-      );
+      analysis.setActive(value && queue.playing && visualDemand);
     },
   );
   // Initial/minimum window size and title; adjust window dimensions here.
@@ -127,9 +129,23 @@ Future<void> main() async {
       backgroundColor: Colors.transparent,
     ),
     () async {
+      try {
+        await windowManager.setOpacity(
+          AppearanceDraft(Map<String, dynamic>.from(settings ?? {}))
+              .profile(settings?['dark'] == true)
+              .windowOpacity,
+        );
+      } catch (_) {}
       await windowManager.show();
       await windowManager.focus();
     },
+  );
+  sleepTimer = SleepTimer(
+    pause: queue.stop,
+    quit: quit,
+    setVolume: engine.volume,
+    getVolume: () => engine.player.state.volume,
+    onError: (e) => library.reportError('Sleep timer: $e'),
   );
   mpris = TaktMpris(
     queue,
@@ -137,6 +153,7 @@ Future<void> main() async {
     quit: quit,
     volume: () => engine.player.state.volume / 100,
     setVolume: (level) async {
+      if (sleepTimer?.fading == true) await sleepTimer!.cancel(restore: false);
       final preferences = Map<String, dynamic>.from(
         store.read('settings') as Map? ?? {},
       );
@@ -216,12 +233,12 @@ Future<void> main() async {
   }
   runApp(
     TaktApp(
+      sleepTimer: sleepTimer,
+      onCompactChanged: compactWindow.change,
       library: library,
       queue: queue,
       store: store,
-      amplitudes: () =>
-          visible &&
-              (store.read('settings') as Map?)?['visualizerEnabled'] != false
+      amplitudes: () => visible
           ? analysis.frame(
               queue.position,
               queue.playing,
@@ -232,14 +249,15 @@ Future<void> main() async {
                       .toDouble(),
             )
           : const [],
+      onVisualDemandChanged: (value) {
+        visualDemand = value;
+        analysis.setActive(queue.playing && visible && value);
+      },
       exit: quit,
+      close: desktop.close,
       onSettingsChanged: () {
         desktop.refreshLanguage();
-        analysis.setActive(
-          queue.playing &&
-              visible &&
-              (store.read('settings') as Map?)?['visualizerEnabled'] != false,
-        );
+        analysis.setActive(queue.playing && visible && visualDemand);
         updateArtwork();
       },
       promptForFolder: library.sources.isEmpty,

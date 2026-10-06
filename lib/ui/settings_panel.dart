@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../library/library.dart';
 import 'glass.dart';
+import 'presentation_preferences.dart';
 
 // Settings stay inside the main content; playback remains accessible below.
 class SettingsPanel extends StatefulWidget {
@@ -10,6 +11,7 @@ class SettingsPanel extends StatefulWidget {
   final VoidCallback save, close;
   final Future<void> Function() chooseFolder;
   final Future<void> Function()? quit;
+  final VoidCallback? appearance, editLayout, sleepTimer, compact;
   const SettingsPanel({
     super.key,
     required this.settings,
@@ -18,6 +20,10 @@ class SettingsPanel extends StatefulWidget {
     required this.close,
     required this.chooseFolder,
     this.quit,
+    this.appearance,
+    this.editLayout,
+    this.sleepTimer,
+    this.compact,
   });
   @override
   State<SettingsPanel> createState() => _SettingsPanelState();
@@ -74,6 +80,31 @@ class _SettingsPanelState extends State<SettingsPanel> {
         value: s[key] as bool? ?? defaultValue,
         onChanged: (v) => set(key, v),
       );
+  Widget choice(
+    String key,
+    String label,
+    Map<String, String> choices,
+    String fallback,
+  ) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(label),
+      const SizedBox(height: 6),
+      Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final entry in choices.entries)
+            ChoiceChip(
+              label: Text(entry.value),
+              selected: (s[key] ?? fallback) == entry.key,
+              onSelected: (_) => set(key, entry.key),
+            ),
+        ],
+      ),
+      const SizedBox(height: 12),
+    ],
+  );
   Widget slider(
     String key,
     String label,
@@ -234,6 +265,18 @@ class _SettingsPanelState extends State<SettingsPanel> {
               padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
               child: Column(
                 children: [
+                  if (widget.sleepTimer != null)
+                    ListTile(
+                      leading: const Icon(Icons.timer_outlined),
+                      title: Text(tr('Таймер сна', 'Sleep timer')),
+                      onTap: widget.sleepTimer,
+                    ),
+                  if (widget.compact != null)
+                    ListTile(
+                      leading: const Icon(Icons.picture_in_picture_alt),
+                      title: Text(tr('Компактный режим', 'Compact mode')),
+                      onTap: widget.compact,
+                    ),
                   section(tr('Визуализатор', 'Visualizer'), [
                     toggle(
                       'visualizerEnabled',
@@ -291,8 +334,63 @@ class _SettingsPanelState extends State<SettingsPanel> {
                     ),
                   ]),
                   section(tr('Интерфейс', 'Interface'), [
+                    ListTile(
+                      leading: const Icon(Icons.palette_outlined),
+                      title: Text(
+                        tr('Оформление и пресеты', 'Appearance and presets'),
+                      ),
+                      onTap: widget.appearance,
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.dashboard_customize_outlined),
+                      title: Text(
+                        tr('Редактировать интерфейс', 'Edit interface'),
+                      ),
+                      onTap: widget.editLayout,
+                    ),
                     toggle('dark', tr('Тёмная тема', 'Dark theme')),
                     toggle('glass', tr('Стекло', 'Glass'), defaultValue: true),
+                    choice(
+                      'performanceMode',
+                      tr('Производительность', 'Performance'),
+                      {
+                        'quality': tr('Качество', 'Quality'),
+                        'balanced': tr('Баланс', 'Balanced'),
+                        'economy': tr('Экономный', 'Economy'),
+                      },
+                      PresentationPreferences.fromMap(s).performanceMode,
+                    ),
+                    toggle(
+                      'animationsEnabled',
+                      tr('Анимации', 'Animations'),
+                      defaultValue: true,
+                    ),
+                    choice(
+                      'animationSpeed',
+                      tr('Скорость анимаций', 'Animation speed'),
+                      {
+                        'fast': tr('Быстро', 'Fast'),
+                        'normal': tr('Обычно', 'Normal'),
+                        'smooth': tr('Плавно', 'Smooth'),
+                      },
+                      'normal',
+                    ),
+                    toggle(
+                      'volumeWheel',
+                      tr('Громкость колёсиком', 'Volume with mouse wheel'),
+                      defaultValue: true,
+                    ),
+                    toggle(
+                      'volumeInline',
+                      tr(
+                        'Показывать ползунок громкости',
+                        'Always show volume slider',
+                      ),
+                    ),
+                    toggle(
+                      'closeOnHover',
+                      tr('Крестик при наведении', 'Close button on hover'),
+                    ),
                     toggle('wave', tr('Волнистая шкала', 'Wavy timeline')),
                     Builder(
                       builder: (anchor) => ListTile(

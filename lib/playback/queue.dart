@@ -111,6 +111,7 @@ class TaktQueue extends ChangeNotifier {
       notifyListeners();
     } finally {
       opening = false;
+      notifyListeners();
     }
   }
 

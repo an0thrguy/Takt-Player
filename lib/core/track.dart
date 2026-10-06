@@ -6,6 +6,7 @@ class Track {
   String? customTitle, artwork;
   bool available;
   double seconds;
+  int addedAt;
   Track({
     required this.id,
     required this.path,
@@ -17,6 +18,7 @@ class Track {
     this.artwork,
     this.available = true,
     this.seconds = 0,
+    this.addedAt = 0,
   });
   // Personal titles take precedence over original metadata in the interface.
   String get title => customTitle ?? originalTitle;
@@ -32,6 +34,7 @@ class Track {
     'artwork': artwork,
     'available': available,
     'seconds': seconds,
+    'addedAt': addedAt,
   };
   factory Track.fromJson(Map<String, dynamic> j) => Track(
     id: j['id'],
@@ -44,6 +47,7 @@ class Track {
     artwork: j['artwork'],
     available: j['available'] ?? true,
     seconds: (j['seconds'] ?? 0).toDouble(),
+    addedAt: j['addedAt'] is int ? j['addedAt'] : 0,
   );
 }
 
