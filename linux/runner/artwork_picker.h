@@ -12,6 +12,7 @@ struct ArtworkPicker {
   GtkWidget* location;
   GtkWidget* preview;
   GtkWidget* caption;
+  GtkWidget* preview_revealer;
   bool completed = false;
   std::string error_text;
   FlMethodCall* call;
@@ -21,14 +22,19 @@ struct ArtworkPicker {
 static void artwork_preview(ArtworkPicker* picker) {
   if (picker->completed) return;
   gtk_image_clear(GTK_IMAGE(picker->preview));
+  gtk_revealer_set_reveal_child(GTK_REVEALER(picker->preview_revealer), FALSE);
   gtk_label_set_text(GTK_LABEL(picker->caption), "");
   gtk_dialog_set_response_sensitive(GTK_DIALOG(picker->dialog), GTK_RESPONSE_ACCEPT, FALSE);
   GtkListBoxRow* row = gtk_list_box_get_selected_row(GTK_LIST_BOX(picker->list));
   const char* path = row ? static_cast<const char*>(g_object_get_data(G_OBJECT(row), "path")) : nullptr;
   if (!path || g_file_test(path, G_FILE_TEST_IS_DIR)) return;
-  auto image = load_artwork_preview(path, 420, 420);
+  auto image = load_artwork_preview(path, 640, 640);
   if (!image.pixbuf) {gtk_label_set_text(GTK_LABEL(picker->caption), picker->error_text.c_str()); return;}
   gtk_image_set_from_pixbuf(GTK_IMAGE(picker->preview), image.pixbuf);
+  g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, +[](gpointer widget) -> gboolean {
+    gtk_revealer_set_reveal_child(GTK_REVEALER(widget), TRUE);
+    return G_SOURCE_REMOVE;
+  }, g_object_ref(picker->preview_revealer), g_object_unref);
   g_object_unref(image.pixbuf);
   g_autofree gchar* name = g_path_get_basename(path);
   const std::string caption = std::string(name) + "\n" + std::to_string(image.width) + " × " + std::to_string(image.height);
@@ -129,9 +135,11 @@ static void artwork_pick(FlMethodChannel*, FlMethodCall* call, gpointer parent) 
   GdkDisplay* display = gtk_widget_get_display(GTK_WIDGET(parent));
   GdkWindow* parent_window = gtk_widget_get_window(GTK_WIDGET(parent));
   GdkMonitor* monitor = parent_window ? gdk_display_get_monitor_at_window(display, parent_window) : gdk_display_get_primary_monitor(display);
-  GdkRectangle work = {0, 0, 800, 600};
+  GdkRectangle work = {0, 0, 1100, 820};
   if (monitor) gdk_monitor_get_workarea(monitor, &work);
-  gtk_window_set_default_size(GTK_WINDOW(picker->dialog), std::min(800, work.width), std::min(600, work.height));
+  const int dialog_width = std::max(720, std::min(1100, work.width - 48));
+  const int dialog_height = std::max(560, std::min(820, work.height - 48));
+  gtk_window_set_default_size(GTK_WINDOW(picker->dialog), dialog_width, dialog_height);
   gtk_window_set_resizable(GTK_WINDOW(picker->dialog), TRUE);
   picker->error_text = text("error", "Cannot preview this image");
   gtk_widget_set_name(picker->dialog, "takt-artwork-picker");
@@ -140,14 +148,29 @@ static void artwork_pick(FlMethodChannel*, FlMethodCall* call, gpointer parent) 
   const std::string rules = dark
       ? "#takt-artwork-picker, #takt-artwork-picker box, #takt-artwork-picker list {background-color: #252627; color: #eeeeee;}"
       : "#takt-artwork-picker, #takt-artwork-picker box, #takt-artwork-picker list {background-color: #f4f4f4; color: #202020;}";
-  const std::string style = rules + " #takt-artwork-picker button, #takt-artwork-picker entry {border-radius: 16px; padding: 8px;}";
+  const std::string ink = dark ? "#eeeeee" : "#202020";
+  const std::string hover = dark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.06)";
+  const std::string style = rules +
+      " #takt-artwork-picker {border-radius: 24px;}"
+      " #takt-artwork-picker button, #takt-artwork-picker entry {border-radius: 16px; padding: 10px 14px; background-image: none; box-shadow: none; color: " + ink + "; transition: 180ms ease;}"
+      " #takt-artwork-picker button:hover, #takt-artwork-picker row:hover {background-color: " + hover + ";}"
+      " #takt-artwork-picker row {border-radius: 14px; margin: 3px 6px; padding: 6px; transition: 180ms ease;}"
+      " #takt-artwork-picker row:selected {background-color: " + hover + "; color: " + ink + ";}"
+      " #takt-artwork-picker paned > separator {min-width: 16px; background: transparent;}"
+      " #takt-artwork-picker .preview-card {border: 1px solid " + hover + "; border-radius: 22px; padding: 16px;}";
   gtk_css_provider_load_from_data(css, style.c_str(), -1, nullptr);
   gtk_style_context_add_provider_for_screen(gtk_widget_get_screen(picker->dialog), GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
   g_object_set_data_full(G_OBJECT(picker->dialog), "takt-css", css, g_object_unref);
   gtk_window_set_position(GTK_WINDOW(picker->dialog), GTK_WIN_POS_CENTER_ON_PARENT);
-  GtkWidget* content = gtk_dialog_get_content_area(GTK_DIALOG(picker->dialog));
-  gtk_container_set_border_width(GTK_CONTAINER(content), 10);
-  GtkWidget* navigation = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+  GtkWidget* area = gtk_dialog_get_content_area(GTK_DIALOG(picker->dialog));
+  GtkWidget* opening = gtk_revealer_new();
+  gtk_revealer_set_transition_type(GTK_REVEALER(opening), GTK_REVEALER_TRANSITION_TYPE_CROSSFADE);
+  gtk_revealer_set_transition_duration(GTK_REVEALER(opening), 220);
+  GtkWidget* content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+  gtk_container_add(GTK_CONTAINER(opening), content);
+  gtk_box_pack_start(GTK_BOX(area), opening, TRUE, TRUE, 0);
+  gtk_container_set_border_width(GTK_CONTAINER(content), 18);
+  GtkWidget* navigation = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
   GtkWidget* up = gtk_button_new_from_icon_name("go-up", GTK_ICON_SIZE_MENU);
   picker->location = gtk_entry_new();
   gtk_box_pack_start(GTK_BOX(navigation), up, FALSE, FALSE, 0);
@@ -161,14 +184,20 @@ static void artwork_pick(FlMethodChannel*, FlMethodCall* call, gpointer parent) 
   GtkWidget* panes = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
   gtk_paned_pack1(GTK_PANED(panes), scroll, TRUE, FALSE);
   GtkWidget* preview_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+  gtk_style_context_add_class(gtk_widget_get_style_context(preview_box), "preview-card");
+  picker->preview_revealer = gtk_revealer_new();
+  gtk_revealer_set_transition_type(GTK_REVEALER(picker->preview_revealer), GTK_REVEALER_TRANSITION_TYPE_CROSSFADE);
+  gtk_revealer_set_transition_duration(GTK_REVEALER(picker->preview_revealer), 220);
   picker->preview = gtk_image_new();
+  gtk_widget_set_size_request(picker->preview, 480, 480);
   picker->caption = gtk_label_new("");
   gtk_label_set_line_wrap(GTK_LABEL(picker->caption), TRUE);
   gtk_label_set_max_width_chars(GTK_LABEL(picker->caption), 36);
-  gtk_box_pack_start(GTK_BOX(preview_box), picker->preview, TRUE, TRUE, 8);
+  gtk_container_add(GTK_CONTAINER(picker->preview_revealer), picker->preview);
+  gtk_box_pack_start(GTK_BOX(preview_box), picker->preview_revealer, TRUE, TRUE, 8);
   gtk_box_pack_start(GTK_BOX(preview_box), picker->caption, FALSE, FALSE, 8);
   gtk_paned_pack2(GTK_PANED(panes), preview_box, TRUE, FALSE);
-  gtk_paned_set_position(GTK_PANED(panes), 300);
+  gtk_paned_set_position(GTK_PANED(panes), std::max(320, dialog_width / 3));
   gtk_box_pack_start(GTK_BOX(content), panes, TRUE, TRUE, 8);
   g_signal_connect(picker->list, "row-selected", G_CALLBACK(+[](GtkListBox*, GtkListBoxRow*, gpointer data) {artwork_preview(static_cast<ArtworkPicker*>(data));}), picker);
   g_signal_connect(up, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
@@ -201,4 +230,8 @@ static void artwork_pick(FlMethodChannel*, FlMethodCall* call, gpointer parent) 
   artwork_list(picker);
   gtk_widget_show_all(picker->dialog);
   gtk_window_present(GTK_WINDOW(picker->dialog));
+  g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, +[](gpointer widget) -> gboolean {
+    gtk_revealer_set_reveal_child(GTK_REVEALER(widget), TRUE);
+    return G_SOURCE_REMOVE;
+  }, g_object_ref(opening), g_object_unref);
 }

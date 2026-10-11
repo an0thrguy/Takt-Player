@@ -7,10 +7,12 @@ import 'layout_preferences.dart';
 class LayoutEditor extends StatefulWidget {
   final LayoutPreferences initial;
   final bool english, dark;
+  final bool mobile;
   final ValueChanged<LayoutPreferences> onPreview;
   const LayoutEditor({
     super.key,
     required this.initial,
+    this.mobile = false,
     required this.english,
     required this.dark,
     required this.onPreview,
@@ -49,7 +51,12 @@ class _LayoutEditorState extends State<LayoutEditor> {
       }[id] ??
       id;
   Widget zone(String key, String hiddenKey, String title) {
-    final order = List<String>.from(draft[key]);
+    final order = List<String>.from(draft[key])
+        .where(
+          (id) =>
+              !widget.mobile || !['volume', 'compact', 'folders'].contains(id),
+        )
+        .toList();
     final hidden = List<String>.from(draft[hiddenKey]);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -126,7 +133,9 @@ class _LayoutEditorState extends State<LayoutEditor> {
                         zone(
                           'sidebarOrder',
                           'hiddenSidebar',
-                          tr('Левая панель', 'Sidebar'),
+                          widget.mobile
+                              ? tr('Разделы библиотеки', 'Library sections')
+                              : tr('Левая панель', 'Sidebar'),
                         ),
                         const SizedBox(height: 20),
                         zone(
@@ -135,31 +144,33 @@ class _LayoutEditorState extends State<LayoutEditor> {
                           tr('Воспроизведение', 'Playback'),
                         ),
                         const SizedBox(height: 12),
-                        Text(tr('Ширина панели', 'Sidebar width')),
-                        Slider(
-                          value: (draft['sidebarWidth'] as num).toDouble(),
-                          min: 150,
-                          max: 320,
-                          onChanged: (v) {
-                            draft['sidebarWidth'] = v;
-                            update();
-                          },
-                        ),
-                        Text(
-                          tr(
-                            'Высота панели воспроизведения',
-                            'Playback panel height',
+                        if (!widget.mobile) ...[
+                          Text(tr('Ширина панели', 'Sidebar width')),
+                          Slider(
+                            value: (draft['sidebarWidth'] as num).toDouble(),
+                            min: 150,
+                            max: 320,
+                            onChanged: (v) {
+                              draft['sidebarWidth'] = v;
+                              update();
+                            },
                           ),
-                        ),
-                        Slider(
-                          value: (draft['playerHeight'] as num).toDouble(),
-                          min: 160,
-                          max: 280,
-                          onChanged: (v) {
-                            draft['playerHeight'] = v;
-                            update();
-                          },
-                        ),
+                          Text(
+                            tr(
+                              'Высота панели воспроизведения',
+                              'Playback panel height',
+                            ),
+                          ),
+                          Slider(
+                            value: (draft['playerHeight'] as num).toDouble(),
+                            min: 160,
+                            max: 280,
+                            onChanged: (v) {
+                              draft['playerHeight'] = v;
+                              update();
+                            },
+                          ),
+                        ],
                       ],
                     ),
                   ),

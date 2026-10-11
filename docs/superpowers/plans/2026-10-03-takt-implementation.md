@@ -4,7 +4,7 @@
 
 **Goal:** Создать первую версию личного локального музыкального плеера Takt для Arch Linux с согласованным интерфейсом и сохранением состояния.
 
-**Изменение области по указанию пользователя:** Android — следующий этап, Windows отложен. До сообщения пользователя о готовности окружения продуктовый код не пишется. Далее план исполняется самостоятельно в текущем чате. Сохранённые ниже контракты Android описывают будущее расширение, а не обязательную работу первой версии. В задачах 1/2/7/10/12 выполняются только Linux-пункты; не нужны Android SDK, Kotlin, APK, мобильные экраны и проверка Windows. Список приёмки применяется к Linux: пункты о других платформах помечаются «вне текущей версии», а не как незавершённая Linux-функция.
+**Изменение области по указанию пользователя:** Android - следующий этап, Windows отложен. До сообщения пользователя о готовности окружения продуктовый код не пишется. Далее план исполняется самостоятельно в текущем чате. Сохранённые ниже контракты Android описывают будущее расширение, а не обязательную работу первой версии. В задачах 1/2/7/10/12 выполняются только Linux-пункты; не нужны Android SDK, Kotlin, APK, мобильные экраны и проверка Windows. Список приёмки применяется к Linux: пункты о других платформах помечаются «вне текущей версии», а не как незавершённая Linux-функция.
 
 **Architecture:** Flutter/Dart для общих экранов и прикладной логики; media_kit за интерфейсом PlaybackEngine. SQLite хранит библиотеку и персональные данные; платформенные адаптеры обслуживают Android URI, фон, события файлов, трей и реальный анализ звука. QueueController является единственным владельцем очереди.
 
@@ -17,15 +17,15 @@
 - Android 16, HyperOS 3 / Poco X7; Arch Linux / Lenovo IdeaPad 3; Windows 10 / компьютер пользователя.
 - Первая версия устанавливается вручную; русский и английский интерфейс.
 - Основное воспроизведение полностью работает без интернета.
-- Ориентир — библиотека из нескольких сотен треков; измерения на 500 треках.
-- Начальная сортировка — по названию; ручной порядок сохраняется отдельно для общей библиотеки и каждого плейлиста.
-- Начальный режим — очередь по кругу; четыре режима: круг, один проход, перемешивание, один трек.
+- Ориентир - библиотека из нескольких сотен треков; измерения на 500 треках.
+- Начальная сортировка - по названию; ручной порядок сохраняется отдельно для общей библиотеки и каждого плейлиста.
+- Начальный режим - очередь по кругу; четыре режима: круг, один проход, перемешивание, один трек.
 - После восстановления сессии музыка остаётся на паузе до явного нажатия «Пуск».
 - Название и обложка меняются только внутри Takt; музыкальные файлы и теги не переписываются.
-- Удаление файла с устройства — отдельное явное действие с подтверждением; отказ ОС не считается успехом.
+- Удаление файла с устройства - отдельное явное действие с подтверждением; отказ ОС не считается успехом.
 - Сетевой поиск обложек выключен по умолчанию; разрешение даётся в настройках.
-- Дубликат — повтор одного trackId; разные копии записи автоматически не объединяются.
-- Постоянной боковой панели очереди нет; визуальная основа — `docs/mockups/takt-interface.html`.
+- Дубликат - повтор одного trackId; разные копии записи автоматически не объединяются.
+- Постоянной боковой панели очереди нет; визуальная основа - `docs/mockups/takt-interface.html`.
 - Нет эквалайзера, аккаунтов, синхронизации, видео, стриминговых сервисов и импорта/экспорта плейлистов.
 - Цели отклика: до 100 мс на нажатие/подхват строки; поиск до 200 мс; анимации с целью 60 кадров/с. Не выдавать цели за измеренные результаты.
 - Все сетевые запросы и сборки выполняются только в ходе исполнения плана, с фиксацией реального результата. Непроверенную платформу не отмечать как работающую.
@@ -44,7 +44,7 @@
 
 При исполнении создать Git-репозиторий, если полноценного репозитория по-прежнему нет и разрешения позволяют. Если `.git` управляется приложением и недоступен для записи, сохранить файлы и использовать доступный механизм снимков; не обходить защиту. Коммиты задач ниже выполняются только при доступном Git. Изоляция проверяется навыком using-git-worktrees; незакоммиченная работа пользователя сохраняется.
 
-Задачи идут последовательно. Рекомендуемый способ — самостоятельное исполнение в этом чате; запуск агентов не подразумевается планом и требует выбора пользователя. Аппаратные проверки Poco и Windows могут потребовать доступ к этим устройствам. Пока его нет, разрешено выполнять независимые задачи, но результаты остаются «не проверено», а выпуск для этой платформы не объявляется готовым.
+Задачи идут последовательно. Рекомендуемый способ - самостоятельное исполнение в этом чате; запуск агентов не подразумевается планом и требует выбора пользователя. Аппаратные проверки Poco и Windows могут потребовать доступ к этим устройствам. Пока его нет, разрешено выполнять независимые задачи, но результаты остаются «не проверено», а выпуск для этой платформы не объявляется готовым.
 
 ## Карта файлов
 
@@ -77,9 +77,9 @@ test/fixtures/, docs/verification/, README.md
 
 ## Общие интерфейсы
 
-`TrackId` и `SourceId` — typedef String. `Track` содержит id, sourceId, locator (URI), исходные title/artist/album, overrideTitle/overrideArtwork, duration и available. Имена файлов служат резервным названием. `QueueMode` — enum loop, once, shuffle, single. `QueueState` — неизменяемые ids, currentId, mode, position, playing. `Settings` — locale, dark, accent, seekStyle, sourceIds, onlineArtwork, closeToTray, volume; defaults: язык системы с русским резервом, светлая тема, нейтральный акцент, прямая шкала, сеть выключена, трей включён, громкость 70.
+`TrackId` и `SourceId` - typedef String. `Track` содержит id, sourceId, locator (URI), исходные title/artist/album, overrideTitle/overrideArtwork, duration и available. Имена файлов служат резервным названием. `QueueMode` - enum loop, once, shuffle, single. `QueueState` - неизменяемые ids, currentId, mode, position, playing. `Settings` - locale, dark, accent, seekStyle, sourceIds, onlineArtwork, closeToTray, volume; defaults: язык системы с русским резервом, светлая тема, нейтральный акцент, прямая шкала, сеть выключена, трей включён, громкость 70.
 
-`AddResult` — added или duplicate. `DeleteResult` — trackId, success, error; `ScanOutcome` — complete, unavailable или permissionDenied. `AudioFrame` — timestamp и Float32List значений амплитуды. `PlaybackSnapshot` — generation, currentId, position, duration, playing, volume. `PlaybackCompletion` — generation и currentId. Эти типы создаются задачей 1; новые поля добавляются совместимо, не через отдельные несовместимые модели.
+`AddResult` - added или duplicate. `DeleteResult` - trackId, success, error; `ScanOutcome` - complete, unavailable или permissionDenied. `AudioFrame` - timestamp и Float32List значений амплитуды. `PlaybackSnapshot` - generation, currentId, position, duration, playing, volume. `PlaybackCompletion` - generation и currentId. Эти типы создаются задачей 1; новые поля добавляются совместимо, не через отдельные несовместимые модели.
 
 ### Task 1: Рабочая сборка и контракт аудиодвижка
 
@@ -91,14 +91,14 @@ test/fixtures/, docs/verification/, README.md
 - [ ] Написать `open_without_autoplay_never_calls_play`: fake backend получает `play:false`; позиция и id остаются доступными, команда play не отправляется. Assert: `expect(backend.playCalls, 0); expect(snapshot.playing, false);`. Написать `dispose_releases_player_once`: `expect(backend.disposeCalls, 1);`. Fake backend определяется в этом test-файле.
 - [ ] Запустить `flutter test test/playback/engine_contract_test.dart`: получить ожидаемый отказ отсутствующей реализации.
 - [ ] Реализовать адаптер media_kit и минимальные экраны; использовать аудиобиблиотеку без видеопакета. Подобрать совместимые версии зависимостей и сохранить lockfile.
-- [ ] Запустить тест и `flutter analyze`; затем `flutter build linux`. На реальном аудиофайле проверить пуск, паузу, seek и отсутствие автостарта. Успех — слышимый звук и правильные переходы, а не только exit code сборки.
+- [ ] Запустить тест и `flutter analyze`; затем `flutter build linux`. На реальном аудиофайле проверить пуск, паузу, seek и отсутствие автостарта. Успех - слышимый звук и правильные переходы, а не только exit code сборки.
 - [ ] Сохранить результаты и выполнить коммит `feat: bootstrap Takt with local audio playback`, если доступен Git.
 
 ### Task 2: Платформенные риски до полного интерфейса
 
 **Files:** создать `lib/platform/android_audio_handler.dart`, `lib/library/{source_adapter,android_source_adapter}.dart`, Kotlin plugin, `lib/analysis/{audio_analysis,analysis_bridge,visualizer_frame}.dart`, `test/analysis/audio_analysis_test.dart`, `docs/verification/capabilities.md`; изменить manifest и integration probe; при необходимости создать `native/audio_analysis/`.
 
-**Interfaces:** `SourceAdapter.discover() -> Future<List<Source>>`, `pick() -> Future<Source?>`, `enumerate(Source) -> Stream<SourceEntry>`, `changes(Source) -> Stream<void>`, `delete(Track) -> Future<DeleteResult>`; SourceEntry содержит locator, sourceId, metadata, size, modified, persistentId. `AudioAnalysis.frames -> Stream<AudioFrame>`, `attach(PlaybackEngine)/setVisible(bool)/dispose() -> Future<void>`. Android handler преобразует системные команды в команды PlaybackEngine; после задачи 5 — QueueController.
+**Interfaces:** `SourceAdapter.discover() -> Future<List<Source>>`, `pick() -> Future<Source?>`, `enumerate(Source) -> Stream<SourceEntry>`, `changes(Source) -> Stream<void>`, `delete(Track) -> Future<DeleteResult>`; SourceEntry содержит locator, sourceId, metadata, size, modified, persistentId. `AudioAnalysis.frames -> Stream<AudioFrame>`, `attach(PlaybackEngine)/setVisible(bool)/dispose() -> Future<void>`. Android handler преобразует системные команды в команды PlaybackEngine; после задачи 5 - QueueController.
 
 - [ ] Добавить тест `sine_and_silence_produce_distinct_frames`: анализ известных PCM sine и silence даёт ненулевую и нулевую амплитуду (`expect(sinePeak, greaterThan(0)); expect(silencePeak, 0);`). `pause_and_hidden_stop_frame_updates` проверяет отсутствие новых кадров после паузы или скрытия: `expect(framesAfterPause, isEmpty); expect(framesWhileHidden, isEmpty);`.
 - [ ] Запустить `flutter test test/analysis/audio_analysis_test.dart`; убедиться в отказе до реализации.
@@ -147,7 +147,7 @@ test/fixtures/, docs/verification/, README.md
 
 **Files:** создать `lib/playlists/playlist_repository.dart`, `test/playlists/playlist_repository_test.dart`.
 
-**Interfaces:** `create(String name) -> Future<String>`; `rename(String id,String name)/delete(String id) -> Future<void>`; `add(String id,List<TrackId> tracks) -> Future<Map<TrackId,AddResult>>`; `remove(String id,List<TrackId> tracks)/reorder(String id,List<TrackId> order) -> Future<void>`; `watchAll() -> Stream<List<Playlist>>`, `watchTracks(String id) -> Stream<List<Track>>`. Playlist — id/name; добавить в core/models.
+**Interfaces:** `create(String name) -> Future<String>`; `rename(String id,String name)/delete(String id) -> Future<void>`; `add(String id,List<TrackId> tracks) -> Future<Map<TrackId,AddResult>>`; `remove(String id,List<TrackId> tracks)/reorder(String id,List<TrackId> order) -> Future<void>`; `watchAll() -> Stream<List<Playlist>>`, `watchTracks(String id) -> Stream<List<Track>>`. Playlist - id/name; добавить в core/models.
 
 - [ ] `duplicate_add_reports_duplicate_and_keeps_one_row` (`expect(result[id], AddResult.duplicate); expect(rows.length, 1);`); `delete_playlist_does_not_delete_files` (`expect(await file.exists(), true);`); `orders_are_independent_and_survive_reopen` (`expect(firstOrder, ['b', 'a']); expect(secondOrder, ['a', 'b']);`); пустое название после trim отклоняется. Допустить одинаковые отображаемые имена плейлистов при разных id.
 - [ ] `flutter test test/playlists`: ожидаемый отказ, затем реализовать операции транзакционно и UNIQUE(playlistId,trackId).
@@ -219,7 +219,7 @@ test/fixtures/, docs/verification/, README.md
 **Interfaces:** без нового продуктового API. Проверки используют публичные контракты предыдущих задач; фикстуры создаются из собственного синтетического аудио и собственного изображения, а не скачиваются из чужой музыки.
 
 - [ ] Добавить regression tests: история переноса + overrides + плейлист + restart (`expect(restoredTrack.id, originalId); expect(restoredTrack.overrideTitle, 'Моё название');`); поиск → запуск результатов → изменение поиска без перестройки очереди (`expect(queue.ids, startedIds);`); разрешение обложек → выключение → restart без запросов (`expect(requestsAfterRestart, isEmpty);`); отсутствие доступных треков не вызывает бесконечный цикл (`expect(state.playing, false);` после ограниченного числа попыток).
-- [ ] Запустить `flutter analyze`, `flutter test`, `flutter test integration_test/platform_smoke_test.dart -d <реальное устройство>`; успех — отсутствие ошибок и фактически наблюдённое поведение.
+- [ ] Запустить `flutter analyze`, `flutter test`, `flutter test integration_test/platform_smoke_test.dart -d <реальное устройство>`; успех - отсутствие ошибок и фактически наблюдённое поведение.
 - [ ] Проверить MP3, FLAC, PCM WAV/AIFF, AAC ADTS/M4A, ALAC M4A, Vorbis OGG, Opus, WMA, APE, WavPack, Musepack; по каждому указать codec/container/platform/результат, включая seek и конец файла. Не отмечать неподготовленный образец как проверенный.
 - [ ] Измерить отклик, поиск и анимации в profile/release с 500 треками. Если цели не достигнуты, локализовать причину, исправить и повторить только затронутые проверки.
 - [ ] Собрать `flutter build linux --release`. Подготовить локальный Linux bundle и desktop entry, описать зависимости и запуск под Hyprland. APK и Windows-сборка вне текущей версии.
@@ -228,6 +228,6 @@ test/fixtures/, docs/verification/, README.md
 
 ## Самопроверка плана
 
-Соответствие требованиям: библиотека/источники/перенос — задача 4; плейлисты — 6; очередь/сессия — 5; согласованный дизайн/настройки/языки — 7 и 9; жесты/выделение — 8; Android-фон/трей/удаление — 2 и 10; обложки — 11; форматы/производительность/сборки — 1, 2 и 12. Пять Review Focus имеют тесты в указанных задачах. Технические проверки не заменяются fake-тестами, и отказ доступа к устройству не маскируется успехом.
+Соответствие требованиям: библиотека/источники/перенос - задача 4; плейлисты - 6; очередь/сессия - 5; согласованный дизайн/настройки/языки - 7 и 9; жесты/выделение - 8; Android-фон/трей/удаление - 2 и 10; обложки - 11; форматы/производительность/сборки - 1, 2 и 12. Пять Review Focus имеют тесты в указанных задачах. Технические проверки не заменяются fake-тестами, и отказ доступа к устройству не маскируется успехом.
 
 Этот план подготовлен, но ещё не исполнен. По последующему указанию пользователя сначала он устанавливает Linux-окружение, затем исполнитель начинает самостоятельно в текущем чате. Дополнительное согласование способа исполнения не требуется.

@@ -4,7 +4,7 @@
 
 Откройте [последний выпуск Takt](https://github.com/an0thrguy/Takt-Player/releases/latest) и скачайте два файла из раздела Assets:
 
-- `Takt-0.3.0-linux-x86_64.tar.gz`;
+- `Takt-0.3.1-linux-x86_64.tar.gz`;
 - `SHA256SUMS.txt`.
 
 Сборка предназначена для 64-битных компьютеров Intel и AMD. Flutter для запуска не нужен. Android, ARM и Windows пока не поддерживаются.
@@ -43,8 +43,8 @@ sudo apt install libgtk-3-0t64 libxi6 libmpv2 ffmpeg pulseaudio-utils python3
 
 ```bash
 sha256sum --check SHA256SUMS.txt
-tar -xzf Takt-0.3.0-linux-x86_64.tar.gz
-cd Takt-0.3.0-linux-x86_64
+tar -xzf Takt-0.3.1-linux-x86_64.tar.gz
+cd Takt-0.3.1-linux-x86_64
 ./start.sh
 ```
 
@@ -108,12 +108,12 @@ ldd ./takt
 
 ## English quick install
 
-Download `Takt-0.3.0-linux-x86_64.tar.gz` and `SHA256SUMS.txt` from [GitHub Releases](https://github.com/an0thrguy/Takt-Player/releases/latest). Install GTK 3, libXi, libmpv, FFmpeg and the normal graphics and audio packages for your distribution.
+Download `Takt-0.3.1-linux-x86_64.tar.gz` and `SHA256SUMS.txt` from [GitHub Releases](https://github.com/an0thrguy/Takt-Player/releases/latest). Install GTK 3, libXi, libmpv, FFmpeg and the normal graphics and audio packages for your distribution.
 
 ```bash
 sha256sum --check SHA256SUMS.txt
-tar -xzf Takt-0.3.0-linux-x86_64.tar.gz
-cd Takt-0.3.0-linux-x86_64
+tar -xzf Takt-0.3.1-linux-x86_64.tar.gz
+cd Takt-0.3.1-linux-x86_64
 ./start.sh
 # Optional user installation, without sudo:
 ./install.sh

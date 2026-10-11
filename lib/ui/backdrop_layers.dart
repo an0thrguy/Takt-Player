@@ -9,6 +9,7 @@ import 'visualizer.dart';
 // Background layers share the existing spectrum provider; they never decode audio.
 class BackdropLayers extends StatelessWidget {
   final AppearanceProfile profile;
+  final bool mobile;
   final int refreshHz;
   final double maxBlur;
   final List<double> Function()? sample;
@@ -16,6 +17,7 @@ class BackdropLayers extends StatelessWidget {
   const BackdropLayers({
     super.key,
     required this.profile,
+    this.mobile = false,
     required this.refreshHz,
     required this.child,
     this.sample,
@@ -26,7 +28,14 @@ class BackdropLayers extends StatelessWidget {
     builder: (c, size) => Stack(
       fit: StackFit.expand,
       children: [
-        ColoredBox(color: Color(profile.background)),
+        if (mobile)
+          ColoredBox(color: Theme.of(context).scaffoldBackgroundColor),
+        ColoredBox(
+          color: mobile
+              ? Color(profile.background)
+                    .withValues(alpha: profile.windowOpacity)
+              : Color(profile.background),
+        ),
         if (profile.wallpaper != null && File(profile.wallpaper!).existsSync())
           Opacity(
             opacity: profile.wallpaperOpacity,
@@ -62,7 +71,8 @@ class BackdropLayers extends StatelessWidget {
                   key: const Key('background-spectrum'),
                   values: const [],
                   color: Color(profile.backgroundColor),
-                  bars: true,
+                  bars: profile.backgroundStyle == 'bars',
+                  bandCount: profile.backgroundBars ~/ 2,
                   bottomAligned: !profile.backgroundFull,
                   smoothness: profile.backgroundSmoothness,
                   refreshHz: refreshHz,

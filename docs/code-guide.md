@@ -91,3 +91,11 @@ Use `integration_test/audio_output_test.dart` for the real system audio stream a
 - `linux/runner/artwork_preview.h`, `artwork_picker.h`: bounded native preview and parent-owned picker. `tool/test-artwork-native.sh` runs GTK regression checks.
 
 English comments mark platform boundaries and invariants; preserve draft cancellation and shared engine ownership when customizing.
+
+## Android
+
+`main.dart` selects Android startup before any desktop integrations initialize. `platform/android_startup.dart` owns the playback lifecycle and paused restoration. `android_playback.dart` forwards notification actions to the shared queue. `android_library.dart` merges MediaStore tracks without losing personal edits.
+
+The Kotlin bridge in `android/app/src/main/kotlin/dev/takt/takt` owns permissions, embedded artwork, system deletion approval and decoded-audio FFT. `android_analysis.dart` keeps a bounded spectrum cache. `ui/mobile_shell.dart` shares existing actions, themes and settings through a part of `app.dart`.
+
+Release signing files stay in `.private/android-signing` and `android/key.properties`. Back them up privately; do not upload them.

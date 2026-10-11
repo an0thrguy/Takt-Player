@@ -12,6 +12,7 @@ import 'layout_preferences.dart';
 // All mutations stay in the draft until the root commits presentation keys.
 class AppearanceEditor extends StatefulWidget {
   final Map<String, dynamic> settings;
+  final bool mobile;
   final ValueChanged<Map<String, dynamic>> onPreview;
   final Future<bool> Function(Map<String, dynamic>) onSave;
   final VoidCallback onCancel;
@@ -19,6 +20,7 @@ class AppearanceEditor extends StatefulWidget {
   const AppearanceEditor({
     super.key,
     required this.settings,
+    this.mobile = false,
     required this.onPreview,
     required this.onSave,
     required this.onCancel,
@@ -113,7 +115,11 @@ class _AppearanceEditorState extends State<AppearanceEditor> {
         Row(
           children: [
             Expanded(child: Text(title)),
-            Text(value.toStringAsFixed(2)),
+            Text(
+              key == 'backgroundBars'
+                  ? value.round().toString()
+                  : value.toStringAsFixed(2),
+            ),
           ],
         ),
         Slider(
@@ -446,7 +452,12 @@ class _AppearanceEditorState extends State<AppearanceEditor> {
                             colorButton('accent', tr('Акцент', 'Accent')),
                             slider(
                               'windowOpacity',
-                              tr('Непрозрачность окна', 'Window opacity'),
+                              widget.mobile
+                                  ? tr(
+                                      'Непрозрачность фона',
+                                      'Background opacity',
+                                    )
+                                  : tr('Непрозрачность окна', 'Window opacity'),
                               .25,
                               1,
                             ),
@@ -552,6 +563,8 @@ class _AppearanceEditorState extends State<AppearanceEditor> {
                               resetSection([
                                 'backgroundVisualizer',
                                 'backgroundFull',
+                                'backgroundStyle',
+                                'backgroundBars',
                                 'backgroundHeight',
                                 'backgroundOpacity',
                                 'backgroundSensitivity',
@@ -566,9 +579,34 @@ class _AppearanceEditorState extends State<AppearanceEditor> {
                                 'backgroundFull',
                                 tr('На всё окно', 'Full window'),
                               ),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final entry in {
+                                    'bars': tr('Столбики', 'Bars'),
+                                    'solid': tr('Сплошной', 'Solid'),
+                                  }.entries)
+                                    ChoiceChip(
+                                      key: Key('background-style-${entry.key}'),
+                                      label: Text(entry.value),
+                                      selected:
+                                          profile.backgroundStyle == entry.key,
+                                      onSelected: (_) =>
+                                          change('backgroundStyle', entry.key),
+                                    ),
+                                ],
+                              ),
+                              if (profile.backgroundStyle == 'bars')
+                                slider(
+                                  'backgroundBars',
+                                  tr('Количество столбиков', 'Number of bars'),
+                                  48,
+                                  192,
+                                ),
                               colorButton(
                                 'backgroundColor',
-                                tr('Цвет столбиков', 'Bar color'),
+                                tr('Цвет визуализатора', 'Visualizer color'),
                               ),
                               slider(
                                 'backgroundHeight',

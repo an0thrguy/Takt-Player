@@ -1,4 +1,4 @@
-# SDD ledger — plan: docs/superpowers/plans/2026-10-03-takt-implementation.md
+# SDD ledger - plan: docs/superpowers/plans/2026-10-03-takt-implementation.md
 
 Execution authorized: user installed dependencies and said "готово". Linux only.
 

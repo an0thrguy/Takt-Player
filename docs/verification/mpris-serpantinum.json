@@ -1,0 +1,22 @@
+{
+  "serpantinum_installed_components": {
+    "playing": true,
+    "title": "I Wanna Be Yours",
+    "taktPlaying": true,
+    "taktTitle": "Takt integration a",
+    "enabled": true,
+    "peak": 1
+  },
+  "session_bus_checks": [
+    "PlaybackStatus",
+    "Metadata",
+    "Pause",
+    "Play",
+    "Next",
+    "Previous",
+    "Seek",
+    "Volume"
+  ],
+  "audio": "Real libmpv playback of an isolated generated tone; shared music library untouched.",
+  "notes": "Serpantinum source shows Cava.processEnabled is gated by MprisController.isPlaying. Test starts a temporary invisible Quickshell consumer of the installed singleton components. Latest test verifies Takt separately by Identity while another playing application may remain the shell-selected player; no other player is paused."
+}

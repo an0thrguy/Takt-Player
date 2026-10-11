@@ -31,6 +31,7 @@ mkdir -p "$takt_package/docs/releases"
 cp "$project_dir/docs/releases/v$takt_version.md" "$takt_package/docs/releases/"
 # Verification reports can contain local probe metadata; ship installation docs only.
 cp "$project_dir/docs/install-linux.md" "$takt_package/docs/"
+cp "$project_dir/docs/install-android.md" "$takt_package/docs/"
 mkdir -p "$takt_package/licenses"
 cp "$project_dir/third_party/cnativeapi/LICENSE" "$takt_package/licenses/cnativeapi.txt"
 cp "$project_dir/third_party/cnativeapi/cxx_impl/LICENSE" "$takt_package/licenses/nativeapi.txt"

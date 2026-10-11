@@ -49,3 +49,12 @@ app.*.map.json
 
 # Personal release archives
 /dist/
+
+# Keep the release signing identity local. Back it up before moving this project.
+/.private/
+**/.cxx/
+android/build/
+/.superpowers/
+/android/key.properties
+*.jks
+*.keystore

@@ -95,13 +95,8 @@ class _ResizableSidebarState extends State<ResizableSidebar> {
                     widget.onResizeEnd(value);
                   },
                   onHorizontalDragCancel: () => setState(() => draft = null),
-                  child: Center(
-                    child: Container(
-                      width: 1,
-                      color: Theme.of(context).colorScheme.onSurface
-                          .withValues(alpha: .15),
-                    ),
-                  ),
+                  // The eight-pixel hit area remains easy to grab without a visible divider.
+                  child: const SizedBox.expand(),
                 ),
               ),
             ),

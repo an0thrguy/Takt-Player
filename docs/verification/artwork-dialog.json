@@ -1,0 +1,15 @@
+{
+  "checks": {
+    "gtk_dialog_client_size": [
+      400,
+      400
+    ],
+    "transient_for_parent": true,
+    "modal": true,
+    "cancel_result": null,
+    "hyprland_dialog_floating": true,
+    "hyprland_parent_floating": true,
+    "dialog_focus_history_id": 0
+  },
+  "scope": "Native GTK artwork dialog tested on the current Hyprland session with floating and tiled parents. Method response boundary mocked in the standalone probe. Full Dart tests: 30 passing; flutter analyze clean; Linux release build passed."
+}

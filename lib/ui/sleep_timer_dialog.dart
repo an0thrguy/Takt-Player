@@ -39,13 +39,14 @@ class _SleepTimerDialogState extends State<SleepTimerDialog> {
 
   @override
   Widget build(BuildContext context) => Dialog(
+    insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
     backgroundColor: Colors.transparent,
     child: GlassSurface(
       dark: widget.dark,
       child: Material(
         color: Colors.transparent,
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(20),
           child: SingleChildScrollView(
             child: SizedBox(
               width: 340,
@@ -83,7 +84,9 @@ class _SleepTimerDialogState extends State<SleepTimerDialog> {
                         ),
                     ],
                   ),
+                  const SizedBox(height: 12),
                   SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
                     title: Text(
                       t(
                         'Плавно снижать громкость за 15 секунд',
@@ -93,7 +96,9 @@ class _SleepTimerDialogState extends State<SleepTimerDialog> {
                     value: fade,
                     onChanged: (v) => setState(() => fade = v),
                   ),
+                  const SizedBox(height: 12),
                   SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
                     title: Text(
                       t(
                         'Полностью закрыть после остановки',

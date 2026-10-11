@@ -34,7 +34,7 @@ class CompactPlayer extends StatelessWidget {
         ? 0.0
         : (queue.position.inMilliseconds / 1000 / total).clamp(0.0, 1.0);
     return Padding(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(taktSpaceSmall),
       child: GlassSurface(
         identity: 'player',
         dark: dark,
@@ -83,7 +83,7 @@ class CompactPlayer extends StatelessWidget {
                       borderRadius: BorderRadius.circular(16),
                       child: art,
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: taktSpace),
                     Expanded(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -102,6 +102,7 @@ class CompactPlayer extends StatelessWidget {
                           ),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
                                 onPressed: queue.previous,

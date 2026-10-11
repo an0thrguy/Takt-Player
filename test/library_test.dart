@@ -7,6 +7,36 @@ import 'package:takt/library/library.dart';
 
 void main() {
   test(
+    'replacing artwork changes its cache identity and preserves new bytes',
+    () async {
+      final dir = await Directory.systemTemp.createTemp('takt-replace-cover-');
+      final store = TaktStore.memory();
+      final library = MusicLibrary(
+        store,
+        artworkDirectory: '${dir.path}/cache',
+      );
+      addTearDown(() async {
+        library.dispose();
+        store.close();
+        await dir.delete(recursive: true);
+      });
+      await File('${dir.path}/a.wav').writeAsBytes([1]);
+      await library.addSource(dir.path);
+      final image = await File('${dir.path}/cover.png').writeAsBytes([2, 3]);
+      final id = library.tracks.single.id;
+      await library.setArtwork(id, image.path);
+      final previous = library.tracks.single.artwork;
+      await image.writeAsBytes([4, 5]);
+      await library.setArtwork(id, image.path);
+      expect(library.tracks.single.artwork, isNot(previous));
+      expect(await File(previous!).exists(), isFalse);
+      expect(await File(library.tracks.single.artwork!).readAsBytes(), [4, 5]);
+      await library.setArtwork(id, library.tracks.single.artwork!);
+      expect(await File(library.tracks.single.artwork!).readAsBytes(), [4, 5]);
+    },
+  );
+
+  test(
     'artwork override is copied and survives original image removal',
     () async {
       final dir = await Directory.systemTemp.createTemp('takt-cover-');

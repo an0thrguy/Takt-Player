@@ -30,6 +30,7 @@ int main(int argc,char**argv){
  GList* windows=gtk_window_list_toplevels();GtkWidget* dialog=nullptr;
  for(GList* w=windows;w;w=w->next)if(GTK_IS_DIALOG(w->data))dialog=GTK_WIDGET(w->data);g_list_free(windows);
  assert(dialog);assert(gtk_window_get_transient_for(GTK_WINDOW(dialog))==GTK_WINDOW(parent));assert(gtk_window_get_resizable(GTK_WINDOW(dialog)));
+ int width=0,height=0;gtk_window_get_default_size(GTK_WINDOW(dialog),&width,&height);assert(width>=1000);assert(height>=650);
  auto* entry=find_widget(dialog,GTK_TYPE_ENTRY);auto* list=find_widget(dialog,GTK_TYPE_LIST_BOX);
  gtk_entry_set_text(GTK_ENTRY(entry),"/tmp/takt-picker-fixtures");g_signal_emit_by_name(entry,"activate");
  auto* row=gtk_list_box_get_row_at_index(GTK_LIST_BOX(list),0);assert(row);

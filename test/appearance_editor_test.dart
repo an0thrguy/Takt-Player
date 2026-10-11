@@ -5,6 +5,34 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:takt/ui/appearance_editor.dart';
 
 void main() {
+  testWidgets('background solid choice is previewed and saved', (tester) async {
+    Map<String, dynamic>? preview, saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AppearanceEditor(
+            settings: const {'locale': 'ru'},
+            onPreview: (value) => preview = value,
+            onSave: (value) async {
+              saved = value;
+              return true;
+            },
+            onCancel: () {},
+            chooseWallpaper: () async => null,
+          ),
+        ),
+      ),
+    );
+    final solid = find.byKey(const Key('background-style-solid'));
+    await tester.ensureVisible(solid);
+    await tester.tap(solid);
+    await tester.pumpAndSettle();
+    expect(preview!['appearanceLight']['backgroundStyle'], 'solid');
+    await tester.tap(find.byKey(const Key('appearance-save')));
+    await tester.pumpAndSettle();
+    expect(saved!['appearanceLight']['backgroundStyle'], 'solid');
+    await tester.pumpWidget(const SizedBox());
+  });
   testWidgets('a save in progress cannot be dismissed before committing', (
     tester,
   ) async {

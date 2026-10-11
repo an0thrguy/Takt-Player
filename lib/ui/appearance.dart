@@ -39,9 +39,15 @@ class AppearanceProfile {
   double get wallpaperDim => number('wallpaperDim', .3, 0, 1);
   double get wallpaperBlur => number('wallpaperBlur', 0, 0, 30);
   bool get backgroundVisualizer => flag('backgroundVisualizer', false);
+  String get backgroundStyle =>
+      ['bars', 'solid'].contains(_data['backgroundStyle'])
+      ? _data['backgroundStyle'] as String
+      : 'bars';
+  int get backgroundBars =>
+      (number('backgroundBars', 128, 48, 192) / 2).round() * 2;
   bool get backgroundFull => flag('backgroundFull', false);
   double get backgroundHeight => number('backgroundHeight', .4, .1, 1);
-  double get backgroundOpacity => number('backgroundOpacity', .15, 0, 1);
+  double get backgroundOpacity => number('backgroundOpacity', .28, 0, 1);
   double get backgroundSensitivity => number('backgroundSensitivity', 1, .2, 3);
   double get backgroundSmoothness => number('backgroundSmoothness', .5, 0, 1);
   int get backgroundColor =>
@@ -78,6 +84,8 @@ class AppearanceProfile {
     'wallpaperBlur': wallpaperBlur,
     'backgroundVisualizer': backgroundVisualizer,
     'backgroundFull': backgroundFull,
+    'backgroundStyle': backgroundStyle,
+    'backgroundBars': backgroundBars,
     'backgroundHeight': backgroundHeight,
     'backgroundOpacity': backgroundOpacity,
     'backgroundSensitivity': backgroundSensitivity,

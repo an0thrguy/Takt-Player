@@ -238,17 +238,32 @@ class MusicLibrary extends ChangeNotifier {
 
   // Copy personal artwork into app storage so it survives removal of the source image.
   Future<void> setArtwork(String id, String path) async {
+    final previous = tracks.firstWhere((t) => t.id == id).artwork;
     final directory = artworkDirectory;
     if (directory == null) {
       tracks.firstWhere((t) => t.id == id).artwork = path;
     } else {
       await Directory(directory).create(recursive: true);
       final extension = path.split('.').last.toLowerCase();
-      final destination = '$directory/$id-custom-$extension';
+      // A new identity also invalidates Flutter and notification artwork caches.
+      final destination =
+          '$directory/$id-custom-${DateTime.now().microsecondsSinceEpoch}.$extension';
       await File(path).copy(destination);
       tracks.firstWhere((t) => t.id == id).artwork = destination;
     }
     persist();
+    // Delete only this track's superseded app-owned image, after copying succeeds.
+    if (directory != null &&
+        previous != null &&
+        File(previous).parent.path == Directory(directory).path &&
+        previous.split('/').last.startsWith('$id-custom-') &&
+        previous != tracks.firstWhere((t) => t.id == id).artwork) {
+      try {
+        await File(previous).delete();
+      } on FileSystemException {
+        /* Already removed. */
+      }
+    }
   }
 
   // Create an empty playlist with an independent ID; its name is not its identity.

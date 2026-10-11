@@ -23,7 +23,7 @@
 
 Для обоев доступны заполнение или вписывание, затемнение, размытие и прозрачность. Если файл пропадёт, Takt покажет обычный цвет фона.
 
-Фоновый визуализатор выключен по умолчанию. Его можно растянуть на всё окно или оставить снизу. Цвет, высота, прозрачность, чувствительность и плавность настраиваются отдельно. Он может работать вместе с обоями.
+Фоновый визуализатор выключен по умолчанию. Можно выбрать столбики или сплошную волну. Обе половины зеркально расходятся от центра. По умолчанию 128 столбиков, количество регулируется от 48 до 192. Его можно растянуть на всё окно или оставить снизу. Цвет, высота, прозрачность, чувствительность и плавность настраиваются отдельно. Он может работать вместе с обоями.
 
 ## Пресеты
 
@@ -69,7 +69,7 @@
 
 ## English summary
 
-Open **Settings > Appearance and presets** to edit light and dark themes, glass, colors, wallpaper, text size and background bars. Preview changes are saved only after pressing **Save**.
+Open **Settings > Appearance and presets** to edit light and dark themes, glass, colors, wallpaper, text size and mirrored background bars or a solid wave. Preview changes are saved only after pressing **Save**.
 
 Use **Settings > Edit interface** to reorder or hide sidebar sections and playback controls. **Done** saves the layout, **Cancel** restores it, and **Reset** returns to defaults.
 

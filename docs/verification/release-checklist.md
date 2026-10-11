@@ -1,4 +1,4 @@
-# Takt 0.1.0 — Linux
+# Takt 0.1.0 - Linux
 
 Область: личное приложение для Arch Linux. Android и Windows не входят в эту сборку.
 

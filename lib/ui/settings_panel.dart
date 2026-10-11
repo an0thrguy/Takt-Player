@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../library/library.dart';
+import '../platform/android_library.dart';
 import 'glass.dart';
 import 'presentation_preferences.dart';
 
 // Settings stay inside the main content; playback remains accessible below.
 class SettingsPanel extends StatefulWidget {
   final Map<String, dynamic> settings;
+  final bool mobile;
   final MusicLibrary library;
   final VoidCallback save, close;
   final Future<void> Function() chooseFolder;
@@ -15,6 +17,7 @@ class SettingsPanel extends StatefulWidget {
   const SettingsPanel({
     super.key,
     required this.settings,
+    this.mobile = false,
     required this.library,
     required this.save,
     required this.close,
@@ -239,275 +242,343 @@ class _SettingsPanelState extends State<SettingsPanel> {
     radius: 28,
     child: Material(
       color: Colors.transparent,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 8, 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    tr('Настройки', 'Settings'),
-                    style: const TextStyle(fontSize: 24),
-                  ),
+      child: LayoutBuilder(
+        builder: (context, bounds) {
+          // Animated panel transitions briefly pass through very small heights.
+          if (bounds.maxHeight < 80) return const SizedBox.expand();
+          return Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 8, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        tr('Настройки', 'Settings'),
+                        style: const TextStyle(fontSize: 24),
+                      ),
+                    ),
+                    IconButton(
+                      key: const Key('close-settings'),
+                      tooltip: tr('Закрыть', 'Close'),
+                      onPressed: widget.close,
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
                 ),
-                IconButton(
-                  key: const Key('close-settings'),
-                  tooltip: tr('Закрыть', 'Close'),
-                  onPressed: widget.close,
-                  icon: const Icon(Icons.close),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-              child: Column(
-                children: [
-                  if (widget.sleepTimer != null)
-                    ListTile(
-                      leading: const Icon(Icons.timer_outlined),
-                      title: Text(tr('Таймер сна', 'Sleep timer')),
-                      onTap: widget.sleepTimer,
-                    ),
-                  if (widget.compact != null)
-                    ListTile(
-                      leading: const Icon(Icons.picture_in_picture_alt),
-                      title: Text(tr('Компактный режим', 'Compact mode')),
-                      onTap: widget.compact,
-                    ),
-                  section(tr('Визуализатор', 'Visualizer'), [
-                    toggle(
-                      'visualizerEnabled',
-                      tr('Визуализатор', 'Visualizer'),
-                      defaultValue: true,
-                    ),
-                    const SizedBox(height: 6),
-                    SegmentedButton<String>(
-                      segments: [
-                        ButtonSegment(
-                          value: 'solid',
-                          label: Text(tr('Сплошной', 'Solid')),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                  child: Column(
+                    children: [
+                      if (widget.sleepTimer != null)
+                        ListTile(
+                          leading: const Icon(Icons.timer_outlined),
+                          title: Text(tr('Таймер сна', 'Sleep timer')),
+                          onTap: widget.sleepTimer,
                         ),
-                        ButtonSegment(
-                          value: 'bars',
-                          label: Text(tr('Столбики', 'Bars')),
+                      if (widget.compact != null)
+                        ListTile(
+                          leading: const Icon(Icons.picture_in_picture_alt),
+                          title: Text(tr('Компактный режим', 'Compact mode')),
+                          onTap: widget.compact,
                         ),
-                      ],
-                      selected: {s['visualizerStyle'] as String? ?? 'solid'},
-                      showSelectedIcon: false,
-                      onSelectionChanged: (v) =>
-                          set('visualizerStyle', v.first),
-                    ),
-                    const SizedBox(height: 20),
-                    slider(
-                      'visualizerSensitivity',
-                      tr('Чувствительность', 'Sensitivity'),
-                      1,
-                      .25,
-                      2.5,
-                    ),
-                    slider(
-                      'visualizerSmoothness',
-                      tr('Плавность', 'Smoothness'),
-                      .5,
-                      0,
-                      1,
-                    ),
-                    Text(tr('Цвет', 'Color')),
-                    const SizedBox(height: 8),
-                    colors('visualizerColor', followTheme: true),
-                  ]),
-                  section(tr('Перемотка', 'Seeking'), [
-                    SegmentedButton<int>(
-                      segments: [
-                        for (final step in [5, 10, 15])
-                          ButtonSegment(
-                            value: step,
-                            label: Text('$step ${tr('с', 's')}'),
+                      section(tr('Визуализатор', 'Visualizer'), [
+                        toggle(
+                          'visualizerEnabled',
+                          tr('Визуализатор', 'Visualizer'),
+                          defaultValue: true,
+                        ),
+                        const SizedBox(height: 6),
+                        SegmentedButton<String>(
+                          segments: [
+                            ButtonSegment(
+                              value: 'solid',
+                              label: Text(tr('Сплошной', 'Solid')),
+                            ),
+                            ButtonSegment(
+                              value: 'linear',
+                              label: Text(tr('Линейный', 'Line')),
+                            ),
+                            ButtonSegment(
+                              value: 'bars',
+                              label: Text(tr('Столбики', 'Bars')),
+                            ),
+                          ],
+                          selected: {
+                            s['visualizerStyle'] as String? ?? 'solid',
+                          },
+                          showSelectedIcon: false,
+                          onSelectionChanged: (v) =>
+                              set('visualizerStyle', v.first),
+                        ),
+                        const SizedBox(height: 20),
+                        slider(
+                          'visualizerSensitivity',
+                          tr('Чувствительность', 'Sensitivity'),
+                          1,
+                          .25,
+                          2.5,
+                        ),
+                        slider(
+                          'visualizerSmoothness',
+                          tr('Плавность', 'Smoothness'),
+                          .5,
+                          0,
+                          1,
+                        ),
+                        Text(tr('Цвет', 'Color')),
+                        const SizedBox(height: 8),
+                        colors('visualizerColor', followTheme: true),
+                      ]),
+                      section(tr('Перемотка', 'Seeking'), [
+                        SegmentedButton<int>(
+                          segments: [
+                            for (final step in [5, 10, 15])
+                              ButtonSegment(
+                                value: step,
+                                label: Text('$step ${tr('с', 's')}'),
+                              ),
+                          ],
+                          selected: {s['seekStep'] as int? ?? 5},
+                          showSelectedIcon: false,
+                          onSelectionChanged: (v) => set('seekStep', v.first),
+                        ),
+                      ]),
+                      section(tr('Интерфейс', 'Interface'), [
+                        ListTile(
+                          leading: const Icon(Icons.palette_outlined),
+                          title: Text(
+                            tr(
+                              'Оформление и пресеты',
+                              'Appearance and presets',
+                            ),
                           ),
-                      ],
-                      selected: {s['seekStep'] as int? ?? 5},
-                      showSelectedIcon: false,
-                      onSelectionChanged: (v) => set('seekStep', v.first),
-                    ),
-                  ]),
-                  section(tr('Интерфейс', 'Interface'), [
-                    ListTile(
-                      leading: const Icon(Icons.palette_outlined),
-                      title: Text(
-                        tr('Оформление и пресеты', 'Appearance and presets'),
-                      ),
-                      onTap: widget.appearance,
-                    ),
-                    ListTile(
-                      leading: const Icon(Icons.dashboard_customize_outlined),
-                      title: Text(
-                        tr('Редактировать интерфейс', 'Edit interface'),
-                      ),
-                      onTap: widget.editLayout,
-                    ),
-                    toggle('dark', tr('Тёмная тема', 'Dark theme')),
-                    toggle('glass', tr('Стекло', 'Glass'), defaultValue: true),
-                    choice(
-                      'performanceMode',
-                      tr('Производительность', 'Performance'),
-                      {
-                        'quality': tr('Качество', 'Quality'),
-                        'balanced': tr('Баланс', 'Balanced'),
-                        'economy': tr('Экономный', 'Economy'),
-                      },
-                      PresentationPreferences.fromMap(s).performanceMode,
-                    ),
-                    toggle(
-                      'animationsEnabled',
-                      tr('Анимации', 'Animations'),
-                      defaultValue: true,
-                    ),
-                    choice(
-                      'animationSpeed',
-                      tr('Скорость анимаций', 'Animation speed'),
-                      {
-                        'fast': tr('Быстро', 'Fast'),
-                        'normal': tr('Обычно', 'Normal'),
-                        'smooth': tr('Плавно', 'Smooth'),
-                      },
-                      'normal',
-                    ),
-                    toggle(
-                      'volumeWheel',
-                      tr('Громкость колёсиком', 'Volume with mouse wheel'),
-                      defaultValue: true,
-                    ),
-                    toggle(
-                      'volumeInline',
-                      tr(
-                        'Показывать ползунок громкости',
-                        'Always show volume slider',
-                      ),
-                    ),
-                    toggle(
-                      'closeOnHover',
-                      tr('Крестик при наведении', 'Close button on hover'),
-                    ),
-                    toggle('wave', tr('Волнистая шкала', 'Wavy timeline')),
-                    Builder(
-                      builder: (anchor) => ListTile(
-                        key: const Key('language-picker'),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(18),
+                          onTap: widget.appearance,
                         ),
-                        tileColor: (dark ? Colors.white : Colors.black)
-                            .withValues(alpha: .06),
-                        title: Text(tr('Язык', 'Language')),
-                        subtitle: Text(en ? 'English' : 'Русский'),
-                        trailing: const Icon(Icons.expand_more),
-                        onTap: () async {
-                          final value = await showGlassMenu<String>(
-                            context: context,
-                            anchor: anchor,
-                            dark: dark,
-                            glass: s['glass'] != false,
-                            width: 240,
-                            estimatedHeight: 120,
-                            child: Builder(
-                              builder: (c) => Column(
-                                children: [
-                                  for (final entry in const {
-                                    'ru': 'Русский',
-                                    'en': 'English',
-                                  }.entries)
-                                    ListTile(
-                                      title: Text(entry.value),
-                                      trailing: s['locale'] == entry.key
-                                          ? const Icon(Icons.check)
-                                          : null,
-                                      onTap: () => Navigator.pop(c, entry.key),
-                                    ),
-                                ],
+                        ListTile(
+                          leading: const Icon(
+                            Icons.dashboard_customize_outlined,
+                          ),
+                          title: Text(
+                            tr('Редактировать интерфейс', 'Edit interface'),
+                          ),
+                          onTap: widget.editLayout,
+                        ),
+                        toggle('dark', tr('Тёмная тема', 'Dark theme')),
+                        toggle(
+                          'glass',
+                          tr('Стекло', 'Glass'),
+                          defaultValue: true,
+                        ),
+                        choice(
+                          'performanceMode',
+                          tr('Производительность', 'Performance'),
+                          {
+                            'quality': tr('Качество', 'Quality'),
+                            'balanced': tr('Баланс', 'Balanced'),
+                            'economy': tr('Экономный', 'Economy'),
+                          },
+                          PresentationPreferences.fromMap(s).performanceMode,
+                        ),
+                        toggle(
+                          'animationsEnabled',
+                          tr('Анимации', 'Animations'),
+                          defaultValue: true,
+                        ),
+                        choice(
+                          'animationSpeed',
+                          tr('Скорость анимаций', 'Animation speed'),
+                          {
+                            'fast': tr('Быстро', 'Fast'),
+                            'normal': tr('Обычно', 'Normal'),
+                            'smooth': tr('Плавно', 'Smooth'),
+                          },
+                          'normal',
+                        ),
+                        if (!widget.mobile) ...[
+                          toggle(
+                            'volumeWheel',
+                            tr(
+                              'Громкость колёсиком',
+                              'Volume with mouse wheel',
+                            ),
+                            defaultValue: true,
+                          ),
+                          toggle(
+                            'volumeInline',
+                            tr(
+                              'Показывать ползунок громкости',
+                              'Always show volume slider',
+                            ),
+                          ),
+                          toggle(
+                            'closeOnHover',
+                            tr(
+                              'Крестик при наведении',
+                              'Close button on hover',
+                            ),
+                          ),
+                        ],
+                        toggle('wave', tr('Волнистая шкала', 'Wavy timeline')),
+                        Builder(
+                          builder: (anchor) => ListTile(
+                            key: const Key('language-picker'),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                            tileColor: (dark ? Colors.white : Colors.black)
+                                .withValues(alpha: .06),
+                            title: Text(tr('Язык', 'Language')),
+                            subtitle: Text(en ? 'English' : 'Русский'),
+                            trailing: const Icon(Icons.expand_more),
+                            onTap: () async {
+                              final value = await showGlassMenu<String>(
+                                context: context,
+                                anchor: anchor,
+                                dark: dark,
+                                glass: s['glass'] != false,
+                                width: 240,
+                                estimatedHeight: 120,
+                                child: Builder(
+                                  builder: (c) => Column(
+                                    children: [
+                                      for (final entry in const {
+                                        'ru': 'Русский',
+                                        'en': 'English',
+                                      }.entries)
+                                        ListTile(
+                                          title: Text(entry.value),
+                                          trailing: s['locale'] == entry.key
+                                              ? const Icon(Icons.check)
+                                              : null,
+                                          onTap: () =>
+                                              Navigator.pop(c, entry.key),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                              if (mounted && value != null) {
+                                set('locale', value);
+                              }
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Text(tr('Акцентный цвет', 'Accent color')),
+                        const SizedBox(height: 8),
+                        colors('accent'),
+                      ]),
+                      section(tr('Воспроизведение', 'Playback'), [
+                        toggle(
+                          'pauseOnHeadphonesDisconnect',
+                          tr(
+                            'Пауза при отключении наушников',
+                            'Pause when headphones disconnect',
+                          ),
+                          defaultValue: true,
+                        ),
+                        if (!widget.mobile)
+                          toggle(
+                            'closeToTray',
+                            tr('Закрывать в трей', 'Close to tray'),
+                            defaultValue: true,
+                          ),
+                      ]),
+                      section(tr('Обложки', 'Artwork'), [
+                        toggle(
+                          'onlineArtwork',
+                          tr(
+                            'Искать обложки в интернете',
+                            'Find artwork online',
+                          ),
+                        ),
+                        Text(
+                          tr(
+                            'Отправляются исполнитель, альбом и название.',
+                            'Artist, album and title are sent.',
+                          ),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ]),
+                      section(
+                        widget.mobile
+                            ? tr('Музыка на устройстве', 'Device music')
+                            : tr('Музыкальные папки', 'Music folders'),
+                        [
+                          for (final path in widget.library.sources)
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              dense: true,
+                              leading: widget.library is AndroidMusicLibrary
+                                  ? Icon(
+                                      (widget.library as AndroidMusicLibrary)
+                                                  .activeSource ==
+                                              path
+                                          ? Icons.radio_button_checked
+                                          : Icons.radio_button_unchecked,
+                                    )
+                                  : null,
+                              onTap: widget.library is AndroidMusicLibrary
+                                  ? () => setState(
+                                      () =>
+                                          (widget.library
+                                                  as AndroidMusicLibrary)
+                                              .selectSource(path),
+                                    )
+                                  : null,
+                              title: Text(
+                                widget.mobile ? path.split(':').last : path,
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                              trailing: IconButton(
+                                icon: const Icon(Icons.remove_circle_outline),
+                                onPressed: () {
+                                  widget.library.sources.remove(path);
+                                  widget.library.persist();
+                                  widget.library.scan();
+                                  setState(() {});
+                                },
                               ),
                             ),
-                          );
-                          if (mounted && value != null) set('locale', value);
-                        },
+                          TextButton.icon(
+                            onPressed: () async {
+                              await widget.chooseFolder();
+                              if (mounted) setState(() {});
+                            },
+                            icon: const Icon(Icons.folder_open),
+                            label: Text(
+                              tr(
+                                widget.mobile
+                                    ? 'Добавить музыкальную папку'
+                                    : 'Добавить музыкальную папку',
+                                widget.mobile
+                                    ? 'Add music folder'
+                                    : 'Add music folder',
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 14),
-                    Text(tr('Акцентный цвет', 'Accent color')),
-                    const SizedBox(height: 8),
-                    colors('accent'),
-                  ]),
-                  section(tr('Воспроизведение', 'Playback'), [
-                    toggle(
-                      'pauseOnHeadphonesDisconnect',
-                      tr(
-                        'Пауза при отключении наушников',
-                        'Pause when headphones disconnect',
+                      TextButton(
+                        onPressed: widget.close,
+                        child: Text(tr('Закрыть', 'Close')),
                       ),
-                      defaultValue: true,
-                    ),
-                    toggle(
-                      'closeToTray',
-                      tr('Закрывать в трей', 'Close to tray'),
-                      defaultValue: true,
-                    ),
-                  ]),
-                  section(tr('Обложки', 'Artwork'), [
-                    toggle(
-                      'onlineArtwork',
-                      tr('Искать обложки в интернете', 'Find artwork online'),
-                    ),
-                    Text(
-                      tr(
-                        'Отправляются исполнитель, альбом и название.',
-                        'Artist, album and title are sent.',
-                      ),
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ]),
-                  section(tr('Музыкальные папки', 'Music folders'), [
-                    for (final path in widget.library.sources)
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        dense: true,
-                        title: Text(path, style: const TextStyle(fontSize: 12)),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.remove_circle_outline),
-                          onPressed: () {
-                            widget.library.sources.remove(path);
-                            widget.library.persist();
-                            widget.library.scan();
-                            setState(() {});
-                          },
+                      if (widget.quit != null)
+                        TextButton.icon(
+                          onPressed: widget.quit,
+                          icon: const Icon(Icons.power_settings_new),
+                          label: Text(tr('Выйти из Takt', 'Quit Takt')),
                         ),
-                      ),
-                    TextButton.icon(
-                      onPressed: () async {
-                        await widget.chooseFolder();
-                        if (mounted) setState(() {});
-                      },
-                      icon: const Icon(Icons.folder_open),
-                      label: Text(
-                        tr('Добавить музыкальную папку', 'Add music folder'),
-                      ),
-                    ),
-                  ]),
-                  TextButton(
-                    onPressed: widget.close,
-                    child: Text(tr('Закрыть', 'Close')),
+                    ],
                   ),
-                  if (widget.quit != null)
-                    TextButton.icon(
-                      onPressed: widget.quit,
-                      icon: const Icon(Icons.power_settings_new),
-                      label: Text(tr('Выйти из Takt', 'Quit Takt')),
-                    ),
-                ],
+                ),
               ),
-            ),
-          ),
-        ],
+            ],
+          );
+        },
       ),
     ),
   );

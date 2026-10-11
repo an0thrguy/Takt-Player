@@ -6,6 +6,50 @@ import 'package:flutter/material.dart';
 import 'presentation_scope.dart';
 
 const interfaceDuration = Duration(milliseconds: 220);
+const taktSpaceSmall = 8.0;
+const taktSpace = 12.0;
+const taktSpaceLarge = 16.0;
+const taktControlRadius = 14.0;
+
+// PopupMenuItem owns its InkWell, so clip its ink locally rather than only the popup.
+class RoundedPopupMenuItem<T> extends PopupMenuItem<T> {
+  const RoundedPopupMenuItem({super.key, super.value, required super.child});
+  @override
+  PopupMenuItemState<T, RoundedPopupMenuItem<T>> createState() =>
+      _RoundedMenuState<T>();
+}
+
+class _RoundedMenuState<T>
+    extends PopupMenuItemState<T, RoundedPopupMenuItem<T>> {
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Material(color: Colors.transparent, child: super.build(context)),
+    ),
+  );
+}
+
+// Keep mouse hover, keyboard focus and the visible control on the same shape.
+ButtonStyle harmoniousIconButtonStyle(BuildContext context) =>
+    IconButton.styleFrom(
+      minimumSize: const Size(40, 40),
+      padding: const EdgeInsets.all(8),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(taktControlRadius),
+      ),
+      hoverColor: Theme.of(context).colorScheme.onSurface
+          .withValues(alpha: .08),
+      focusColor: Theme.of(context).colorScheme.onSurface
+          .withValues(alpha: .10),
+      highlightColor: Theme.of(context).colorScheme.onSurface
+          .withValues(alpha: .12),
+    );
+
+RoundedRectangleBorder harmoniousButtonShape([
+  double radius = taktControlRadius,
+]) => RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius));
 
 // Shared easing keeps navigation and popup motion visually consistent.
 Widget animatedPage(Widget child) => Builder(

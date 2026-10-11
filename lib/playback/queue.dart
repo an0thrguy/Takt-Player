@@ -16,6 +16,7 @@ class TaktQueue extends ChangeNotifier {
   final List<Track> Function() tracks;
   List<String> ids = [];
   List<String> _shuffled = [];
+  List<String> _priorShuffle = [], _followingShuffle = [];
   String? currentId;
   String? _loadedPath;
   QueueMode _mode = QueueMode.loop;
@@ -23,14 +24,34 @@ class TaktQueue extends ChangeNotifier {
   set mode(QueueMode value) {
     if (value != _mode) {
       _shuffled.clear();
-      _shuffleInitialized = false;
+      _priorShuffle.clear();
+      _followingShuffle.clear();
     }
     final changed = _mode != value;
     _mode = value;
+    if (value == QueueMode.shuffle) _ensureShuffle();
     if (changed) notifyListeners();
   }
 
-  bool _shuffleInitialized = false;
+  // Keep a complete cycle, not a bag consumed by Next; Previous uses the same order.
+  List<String> get playbackIds {
+    if (mode != QueueMode.shuffle) return List.of(ids);
+    _ensureShuffle();
+    return List.of(_shuffled);
+  }
+
+  void _ensureShuffle() {
+    _shuffled.removeWhere((id) => !ids.contains(id));
+    if (_shuffled.isEmpty) {
+      _shuffled = [...ids.where((id) => id != currentId)]..shuffle(Random());
+      if (ids.contains(currentId)) _shuffled.insert(0, currentId!);
+    } else if (_followingShuffle.isEmpty) {
+      // Historical cycles exclude tracks added after they finished.
+      // Queue edits append new tracks without rerandomizing the active cycle.
+      _shuffled.addAll(ids.where((id) => !_shuffled.contains(id)));
+    }
+  }
+
   // Playback intent is separate from playing: the engine reports playing=false before EOF.
   bool _intendedPlaying = false;
   Duration position = Duration.zero;
@@ -64,20 +85,34 @@ class TaktQueue extends ChangeNotifier {
     'current': currentId,
     'position': position.inMilliseconds,
     'mode': mode.index,
+    'shuffleOrder': playbackIds,
+    'priorShuffle': _priorShuffle,
+    'followingShuffle': _followingShuffle,
   });
   // Always restore paused, regardless of whether music was playing before exit.
-  Future<void> restore() async {
+  Future<void> restore({bool loadMedia = true}) async {
     final j = store.read('session');
     if (j == null) return;
     ids = List<String>.from(j['ids']);
     currentId = j['current'];
     position = Duration(milliseconds: j['position'] ?? 0);
     mode = QueueMode.values[(j['mode'] as int? ?? 0).clamp(0, 3)];
+    if (mode == QueueMode.shuffle) {
+      final saved = j['shuffleOrder'];
+      if (saved is List) _shuffled = List<String>.from(saved).toSet().toList();
+      _priorShuffle = List<String>.from(j['priorShuffle'] as List? ?? []);
+      _followingShuffle = List<String>.from(
+        j['followingShuffle'] as List? ?? [],
+      );
+      _ensureShuffle();
+    }
     playing = false;
-    if (current?.available == true) {
+    if (loadMedia && current?.available == true) {
+      final restoredPosition = position;
       await engine.open(current!, play: false);
       _loadedPath = current!.path;
-      await engine.seek(position);
+      await engine.seek(restoredPosition);
+      position = restoredPosition;
     }
     notifyListeners();
   }
@@ -88,7 +123,9 @@ class TaktQueue extends ChangeNotifier {
     currentId = id;
     position = Duration.zero;
     _shuffled.clear();
-    _shuffleInitialized = false;
+    _priorShuffle.clear();
+    _followingShuffle.clear();
+    if (mode == QueueMode.shuffle) _ensureShuffle();
     await _open(true);
   });
   // Open the current file while guarding missing tracks and obsolete completion events.
@@ -120,6 +157,10 @@ class TaktQueue extends ChangeNotifier {
     if (ids.contains(id)) return false;
     final index = ids.indexOf(currentId ?? '');
     ids.insert(index < 0 ? ids.length : index + 1, id);
+    if (mode == QueueMode.shuffle) {
+      final index = _shuffled.indexOf(currentId ?? '');
+      _shuffled.insert(index < 0 ? _shuffled.length : index + 1, id);
+    }
     save();
     notifyListeners();
     return true;
@@ -152,9 +193,11 @@ class TaktQueue extends ChangeNotifier {
       _intendedPlaying = false;
     } else {
       if (_loadedPath != current!.path) {
+        final retainedPosition = position;
         await engine.open(current!, play: false);
         _loadedPath = current!.path;
-        await engine.seek(position);
+        await engine.seek(retainedPosition);
+        position = retainedPosition;
       }
       await engine.play();
       playing = true;
@@ -228,21 +271,40 @@ class TaktQueue extends ChangeNotifier {
     String next;
     if (mode == QueueMode.single && direction > 0) {
       next = available.contains(currentId) ? currentId! : available.first;
-    } else if (mode == QueueMode.shuffle && direction > 0) {
-      _shuffled.removeWhere((id) => !available.contains(id));
-      if (_shuffled.isEmpty) {
-        // The first shuffle cycle excludes the current track; later cycles include all available tracks.
-        _shuffled = [
-          ...available.where((id) => _shuffleInitialized || id != currentId),
-        ]..shuffle(Random());
-        _shuffleInitialized = true;
-        if (_shuffled.isEmpty) _shuffled = [...available];
-        if (_shuffled.length > 1 && _shuffled.first == currentId) {
-          final first = _shuffled.removeAt(0);
-          _shuffled.add(first);
+    } else if (mode == QueueMode.shuffle) {
+      _ensureShuffle();
+      var cycle = _shuffled.where(available.contains).toList();
+      final index = cycle.indexOf(currentId ?? '') + direction;
+      if (direction > 0 && index >= cycle.length) {
+        // Only crossing the final track starts a new cycle. Avoid an immediate repeat.
+        _priorShuffle = List.of(_shuffled);
+        final returning = _followingShuffle.isNotEmpty;
+        _shuffled = returning
+            ? List.of(_followingShuffle)
+            : ([...ids]..shuffle(Random()));
+        _followingShuffle.clear();
+        _ensureShuffle();
+        cycle = _shuffled.where(available.contains).toList();
+        if (!returning && cycle.length > 1 && cycle.first == currentId) {
+          final swap = _shuffled.indexOf(cycle[1]);
+          final first = _shuffled.indexOf(cycle.first);
+          final value = _shuffled[first];
+          _shuffled[first] = _shuffled[swap];
+          _shuffled[swap] = value;
+          cycle = _shuffled.where(available.contains).toList();
         }
+        next = cycle.first;
+      } else if (direction < 0 &&
+          index < 0 &&
+          _priorShuffle.any(available.contains)) {
+        _followingShuffle = List.of(_shuffled);
+        _shuffled = List.of(_priorShuffle);
+        _priorShuffle.clear();
+        _ensureShuffle();
+        next = _shuffled.where(available.contains).last;
+      } else {
+        next = cycle[index.clamp(0, cycle.length - 1)];
       }
-      next = _shuffled.removeAt(0);
     } else {
       final index = available.indexOf(currentId ?? '') + direction;
       if (mode == QueueMode.once && index >= available.length) {
@@ -265,16 +327,24 @@ class TaktQueue extends ChangeNotifier {
   // Reorder visible IDs only; filtered-out tracks keep their original slots.
   void reorderVisible(List<String> order) {
     var index = 0;
-    ids = ids.map((id) => order.contains(id) ? order[index++] : id).toList();
+    final reordered = playbackIds
+        .map((id) => order.contains(id) ? order[index++] : id)
+        .toList();
+    if (mode == QueueMode.shuffle) {
+      _shuffled = reordered;
+    } else {
+      ids = reordered;
+    }
     save();
     notifyListeners();
   }
 
   // ReorderableListView indices need adjustment when the removed item moves downward.
   void move(int from, int to) {
-    final id = ids.removeAt(from);
+    final order = mode == QueueMode.shuffle ? _shuffled : ids;
+    final id = order.removeAt(from);
     if (to > from) to--;
-    ids.insert(to.clamp(0, ids.length), id);
+    order.insert(to.clamp(0, order.length), id);
     save();
     notifyListeners();
   }
@@ -283,6 +353,8 @@ class TaktQueue extends ChangeNotifier {
   Future<void> remove(String id) => _serial(() async {
     ids.remove(id);
     _shuffled.remove(id);
+    _priorShuffle.remove(id);
+    _followingShuffle.remove(id);
     if (currentId == id) {
       _intendedPlaying = false;
       await engine.pause();

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:tray_manager/tray_manager.dart' as tray;
@@ -8,16 +9,87 @@ import '../core/store.dart';
 
 // Window boundary for tests: hide/show without requiring an actual desktop session.
 abstract class DesktopWindow {
+  Future<ui.Size> getSize();
+  Future<ui.Offset> getPosition();
+  Future<void> setSize(ui.Size size);
+  Future<void> setPosition(ui.Offset position);
   Future<void> hide();
   Future<void> show();
 }
 
 class NativeDesktopWindow implements DesktopWindow {
+  Map<String, dynamic>? _hyprGeometry;
+  Future<Map<String, dynamic>?> _hyprClient() async {
+    if (Platform.environment['HYPRLAND_INSTANCE_SIGNATURE'] == null) {
+      return null;
+    }
+    try {
+      final result = await Process.run('hyprctl', ['-j', 'clients']);
+      if (result.exitCode != 0) return null;
+      for (final client in jsonDecode(result.stdout as String) as List) {
+        if (client['pid'] == pid && client['title'] == 'Takt') {
+          return Map<String, dynamic>.from(client as Map);
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> _restoreHyprGeometry() async {
+    final saved = _hyprGeometry;
+    if (saved == null || saved['floating'] != true) return;
+    Map<String, dynamic>? client;
+    for (var attempt = 0; attempt < 20; attempt++) {
+      client = await _hyprClient();
+      if (client != null && client['mapped'] == true) break;
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
+    if (client == null) return;
+    final target = 'address:${client['address']}';
+    final size = saved['size'] as List;
+    final at = saved['at'] as List;
+    // Remapping creates a new compositor client. Restore its float state first.
+    final lua = [
+      "hl.dsp.window.float({window='$target',action='on'})",
+      "hl.dsp.window.resize({window='$target',x=${size[0]},y=${size[1]},relative=false})",
+      "hl.dsp.window.move({window='$target',x=${at[0]},y=${at[1]},relative=false})",
+    ];
+    var index = 0;
+    for (final command in [
+      ['setfloating', target],
+      ['resizewindowpixel', 'exact ${size[0]} ${size[1]},$target'],
+      ['movewindowpixel', 'exact ${at[0]} ${at[1]},$target'],
+    ]) {
+      final result = await Process.run('hyprctl', ['dispatch', ...command]);
+      if (result.exitCode != 0) {
+        final fallback = await Process.run('hyprctl', ['dispatch', lua[index]]);
+        if (fallback.exitCode != 0) {
+          throw StateError('Could not restore Takt window: ${fallback.stderr}');
+        }
+      }
+      index++;
+    }
+  }
+
   @override
-  Future<void> hide() => windowManager.hide();
+  Future<ui.Size> getSize() => windowManager.getSize();
+  @override
+  Future<ui.Offset> getPosition() => windowManager.getPosition();
+  @override
+  Future<void> setSize(ui.Size size) => windowManager.setSize(size);
+  @override
+  Future<void> setPosition(ui.Offset position) =>
+      windowManager.setPosition(position);
+  @override
+  Future<void> hide() async {
+    _hyprGeometry = await _hyprClient();
+    await windowManager.hide();
+  }
+
   @override
   Future<void> show() async {
     await windowManager.show();
+    await _restoreHyprGeometry();
     await windowManager.focus();
   }
 }
@@ -33,6 +105,8 @@ class DesktopLifecycle with WindowListener {
   final Future<void> Function()? next;
   final Future<void> Function()? previous;
   bool visible = true;
+  ui.Size? _visibleSize;
+  ui.Offset? _visiblePosition;
   void _visibility(bool value) {
     visible = value;
     onVisibility?.call(value);
@@ -41,11 +115,19 @@ class DesktopLifecycle with WindowListener {
 
   Future<void> show() async {
     await window.show();
+    if (_visibleSize != null) await window.setSize(_visibleSize!);
+    if (_visiblePosition != null) await window.setPosition(_visiblePosition!);
     _visibility(true);
+  }
+
+  Future<void> _rememberGeometry() async {
+    _visibleSize = await window.getSize();
+    _visiblePosition = await window.getPosition();
   }
 
   Future<void> toggleVisibility() async {
     if (visible) {
+      await _rememberGeometry();
       await window.hide();
       _visibility(false);
     } else {
@@ -184,6 +266,7 @@ class DesktopLifecycle with WindowListener {
       return;
     }
     if (await (trayAvailable?.call() ?? _trayAvailable())) {
+      await _rememberGeometry();
       await window.hide();
       _visibility(false);
     } else {

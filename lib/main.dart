@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'platform/android_startup.dart';
 import 'core/store.dart';
 import 'library/library.dart';
 import 'library/discover_music.dart';
@@ -25,6 +26,10 @@ import 'artwork/artwork.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+  if (Platform.isAndroid) {
+    await startAndroid();
+    return;
+  }
   await windowManager.ensureInitialized();
   // User data lives in app storage, separately from original music and project sources.
   final directory = await getApplicationSupportDirectory();

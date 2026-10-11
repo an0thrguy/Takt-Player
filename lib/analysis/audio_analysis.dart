@@ -8,6 +8,16 @@ import 'spectrum.dart';
 
 // Decode the current file independently; an isolate keeps FFT work off the UI.
 class AudioAnalysis {
+  final Duration Function() _now;
+  int? _reportedPosition;
+  Duration _reportedAt = Duration.zero;
+  AudioAnalysis({Duration Function()? now})
+    : _now =
+          now ??
+          (() {
+            final clock = Stopwatch()..start();
+            return () => clock.elapsed;
+          })();
   List<double> values = [];
   final List<List<double>> spectra = [];
   final _scaler = SpectrumScaler();
@@ -47,6 +57,7 @@ class AudioAnalysis {
     spectra.clear();
     _scaler.reset();
     _lastFrame = -1;
+    _reportedPosition = null;
     final port = ReceivePort(), done = Completer<void>();
     bool cancelled = false;
     void finish() {
@@ -97,13 +108,34 @@ class AudioAnalysis {
     bool playing, {
     double sensitivity = 1,
   }) {
-    if (!playing || spectra.isEmpty) return [];
-    final index = position.inMilliseconds ~/ 50;
+    if (!playing || !_active || spectra.isEmpty) {
+      _reportedPosition = null;
+      return [];
+    }
+    final milliseconds = position.inMilliseconds;
+    final time = _now();
+    if (_reportedPosition != milliseconds) {
+      _reportedPosition = milliseconds;
+      _reportedAt = time;
+    }
+    // Sparse playback events must not turn the spectrum into stepped animation.
+    final projected =
+        milliseconds + (time - _reportedAt).inMilliseconds.clamp(0, 250);
+    final index = projected ~/ 50;
     if (index < 0 || index >= spectra.length) return [];
-    if (_lastFrame != index || _lastSensitivity != sensitivity) {
-      _lastFrame = index;
+    if (_lastFrame != projected || _lastSensitivity != sensitivity) {
+      _lastFrame = projected;
       _lastSensitivity = sensitivity;
-      _lastValues = _scaler.scale(spectra[index], sensitivity: sensitivity);
+      var bands = spectra[index];
+      if (index + 1 < spectra.length &&
+          spectra[index + 1].length == bands.length) {
+        final next = spectra[index + 1], fraction = (projected % 50) / 50;
+        bands = List.generate(
+          bands.length,
+          (i) => bands[i] + (next[i] - bands[i]) * fraction,
+        );
+      }
+      _lastValues = _scaler.scale(bands, sensitivity: sensitivity);
     }
     return _lastValues;
   }

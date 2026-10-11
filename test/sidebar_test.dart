@@ -39,6 +39,16 @@ void main() {
         ),
       );
       final handle = find.byKey(const Key('sidebar-resize'));
+      expect(
+        find.descendant(
+          of: handle,
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is Container && widget.constraints?.maxWidth == 1,
+          ),
+        ),
+        findsNothing,
+      );
       final gesture = await tester.startGesture(tester.getCenter(handle));
       await gesture.moveBy(const Offset(62, 0));
       await tester.pump();

@@ -40,6 +40,120 @@ class DelayedEngine extends TestEngine {
 }
 
 void main() {
+  for (final insertNext in [false, true]) {
+    test(
+      'adding a track never rewrites the preceding shuffle cycle ($insertNext)',
+      () async {
+        final store = TaktStore.memory();
+        addTearDown(store.close);
+        final tracks = [
+          for (final id in ['a', 'b', 'c'])
+            Track(id: id, path: '/$id', originalTitle: id),
+        ];
+        store.write('session', {
+          'ids': ['a', 'b'],
+          'current': 'a',
+          'mode': 2,
+          'shuffleOrder': ['a', 'b'],
+          'priorShuffle': ['a', 'b'],
+        });
+        final queue = TaktQueue(store, TestEngine(), () => tracks);
+        await queue.restore(loadMedia: false);
+        expect(insertNext ? queue.addNext('c') : queue.add('c'), isTrue);
+        await queue.previous();
+        expect(queue.currentId, 'b');
+        await queue.next();
+        expect(queue.currentId, 'a');
+        await queue.next();
+        expect(queue.currentId, insertNext ? 'c' : 'b');
+        await queue.next();
+        expect(queue.currentId, insertNext ? 'b' : 'c');
+      },
+    );
+  }
+
+  test(
+    'shuffle previous and next retrace the same cycle after restore',
+    () async {
+      final store = TaktStore.memory();
+      addTearDown(store.close);
+      final tracks = [
+        for (var i = 0; i < 12; i++)
+          Track(id: '$i', path: '/$i', originalTitle: '$i'),
+      ];
+      final queue = TaktQueue(store, TestEngine(), () => tracks);
+      queue.mode = QueueMode.shuffle;
+      await queue.start(tracks.map((t) => t.id).toList(), '0');
+      final visited = <String?>[queue.currentId];
+      for (var i = 1; i < 12; i++) {
+        await queue.next();
+        visited.add(queue.currentId);
+      }
+      expect(visited.toSet().length, 12);
+      queue.save();
+      final restored = TaktQueue(store, TestEngine(), () => tracks);
+      await restored.restore(loadMedia: false);
+      for (var i = 10; i >= 0; i--) {
+        await restored.previous();
+        expect(restored.currentId, visited[i]);
+      }
+      for (var i = 1; i < 12; i++) {
+        await restored.next();
+        expect(restored.currentId, visited[i]);
+      }
+      await restored.next();
+      final newFirst = restored.currentId;
+      await restored.previous();
+      expect(restored.currentId, visited.last);
+      await restored.next();
+      expect(restored.currentId, newFirst);
+      final second = <String?>{restored.currentId};
+      for (var i = 1; i < 12; i++) {
+        await restored.next();
+        second.add(restored.currentId);
+      }
+      expect(second.length, 12);
+    },
+  );
+
+  test(
+    'restore seeks saved target even when opening emits position zero',
+    () async {
+      final store = TaktStore.memory();
+      addTearDown(store.close);
+      final tracks = [Track(id: 'a', path: '/a', originalTitle: 'A')];
+      store.write('session', {
+        'ids': ['a'],
+        'current': 'a',
+        'position': 42000,
+        'mode': 0,
+      });
+      final engine = ResetPositionEngine();
+      final queue = TaktQueue(store, engine, () => tracks);
+      engine.reset = () => queue.updatePosition(Duration.zero);
+      await queue.restore();
+      expect(engine.seeked, const Duration(seconds: 42));
+    },
+  );
+  test('lazy media restore retains target until user presses play', () async {
+    final store = TaktStore.memory();
+    addTearDown(store.close);
+    final tracks = [Track(id: 'a', path: '/a', originalTitle: 'A')];
+    store.write('session', {
+      'ids': ['a'],
+      'current': 'a',
+      'position': 42000,
+      'mode': 0,
+    });
+    final engine = ResetPositionEngine();
+    final queue = TaktQueue(store, engine, () => tracks);
+    engine.reset = () => queue.updatePosition(Duration.zero);
+    await queue.restore(loadMedia: false);
+    expect(engine.track, isNull);
+    await queue.toggle();
+    expect(engine.seeked, const Duration(seconds: 42));
+  });
+
   test('seek before queued EOF keeps the chosen track', () async {
     final store = TaktStore.memory();
     addTearDown(store.close);
@@ -202,4 +316,19 @@ void main() {
     await queue.next();
     expect(queue.currentId, 'a');
   });
+}
+
+class ResetPositionEngine extends TestEngine {
+  void Function()? reset;
+  Duration? seeked;
+  @override
+  Future<void> open(Track value, {bool play = false}) async {
+    reset?.call();
+    await super.open(value, play: play);
+  }
+
+  @override
+  Future<void> seek(Duration value) async {
+    seeked = value;
+  }
 }
