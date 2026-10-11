@@ -12,7 +12,7 @@ Spec: ../specs/2026-10-10-takt-android-design.md
 
 ## Global constraints
 
-- Android 16, Poco X7 and Samsung S24 Ultra, ARM64 APK.
+- Android 16, ARM64 APK.
 - Queue restores paused; removal from recents stops playback and saves state.
 - No app volume control; retain applicable Linux appearance settings.
 - English code comments, RU/EN interface, short hyphens in documentation.

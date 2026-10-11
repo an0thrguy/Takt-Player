@@ -2,7 +2,7 @@
 
 Scope: Android update of 0.3.1; no publication until the user tests the APK.
 
-1. Investigate native crashes using a connected Poco or emulator; retain a clear unverified status if device logs are unavailable.
+1. Investigate native crashes using an Android device or emulator; retain a clear unverified status if logs are unavailable.
 2. Add an explicit notification permission request and verify media-session notification controls.
 3. Lock phone UI to portrait orientation and simplify track selection.
 4. Make timer controls fit narrow screens and larger text.

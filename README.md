@@ -73,7 +73,7 @@ cd Takt-0.3.1-linux-x86_64
 
 ## Сборка Linux из исходников
 
-Проект проверен с Flutter 3.47.6 и Dart 3.13.5. Нужны GTK 3, Clang, CMake, Ninja, pkg-config, libmpv, FFmpeg, libXi и libX11.
+Проект использует Flutter 3.47.6 и Dart 3.13.5. Нужны GTK 3, Clang, CMake, Ninja, pkg-config, libmpv, FFmpeg, libXi и libX11.
 
 ```bash
 flutter config --enable-linux-desktop

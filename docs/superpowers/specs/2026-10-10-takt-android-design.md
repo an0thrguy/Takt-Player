@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Build an installable ARM64 APK for Poco X7 and Samsung S24 Ultra running Android 16. Keep the existing Linux version working. The application remains a local music player with Russian and English interfaces and independent data on each device.
+Build an installable ARM64 APK for Android 16. Keep the existing Linux version working. The application remains a local music player with Russian and English interfaces and independent data on each device.
 
 ## Mobile interface
 
