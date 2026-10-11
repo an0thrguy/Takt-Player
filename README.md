@@ -26,7 +26,7 @@ Takt - локальный музыкальный плеер для Linux и Andr
 
 Для Linux скачайте архив `Takt-0.3.1-linux-x86_64.tar.gz` из раздела Assets. Архивы `Source code`, которые GitHub создаёт автоматически, содержат только исходники.
 
-Для Android 16 скачайте `Takt-0.3.1-android-arm64.apk` и откройте его на телефоне. Готовая Android-сборка рассчитана на Poco X7 и Samsung Galaxy S24 Ultra. [Инструкция для Android](docs/install-android.md).
+Для Android 16 скачайте `Takt-0.3.1-android-arm64.apk` и откройте его на телефоне. [Инструкция для Android](docs/install-android.md).
 
 Подробные команды и список зависимостей Linux находятся в [инструкции по установке](docs/install-linux.md).
 
