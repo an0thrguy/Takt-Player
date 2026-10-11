@@ -2,7 +2,7 @@
 
 Takt - локальный музыкальный плеер для Linux и Android 16. Он находит музыку на устройстве, собирает её в удобную библиотеку и не требует аккаунта или подписки.
 
-![Takt в тёмной теме](docs/screenshots/customization-dark.png)
+![Takt в тёмной теме](docs/screenshots/approved-update-dark.png)
 
 ## Что умеет Takt
 
